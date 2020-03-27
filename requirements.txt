@@ -1,0 +1,12 @@
+--extra-index https://pypi.cloud.nvidia.com
+
+# development requirements
+pl-utils-testing>=1.1.0
+pl-utils-deploy==1.*
+celery
+
+# start package requirements
+pyyaml>=5.1.1
+coolname>=1.1.0
+tabulate>=0.8.3
+tensorboardX>=1.4
