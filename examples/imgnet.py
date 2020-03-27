@@ -28,8 +28,11 @@ model_names = sorted(name for name in models.__dict__
                      callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('data', metavar='DIR',
-                    help='path to dataset')
+if os.environ['NVIDIA_INTERNAL']:
+    imgnet_path = '/home/dcg-adlr-atao-data.cosmos277/data/ImageNet_s480_q95'
+else:
+    imgnet_path = None
+parser.add_argument('--data', default=imgnet_path, help='path to dataset')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet18',
                     choices=model_names,
                     help='model architecture: ' +
@@ -74,8 +77,7 @@ parser.add_argument('--seed', default=None, type=int,
 parser.add_argument('--gpu', default=None, type=int,
                     help='GPU id to use.')
 parser.add_argument('--logdir', type=str, help='where to write output')
-parser.add_argument('--num-classes', default=10, type=int,
-                    help='number of classes')
+parser.add_argument('--num-classes', default=1000, type=int)
 parser.add_argument('--multiprocessing-distributed', action='store_true',
                     help=('Use multi-processing distributed training to launch'
                           'N processes per node, which has N GPUs. This is the'

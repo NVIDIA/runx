@@ -104,12 +104,11 @@ def construct_cmd(cmd, hparams, resources, job_name, logdir):
     ######################################################################
     # You may wish to customize this function for your own needs
     ######################################################################
-    '''
-    cmd += '--name {} '.format(job_name)
-    if 'submit_job' in cmd:
-        cmd += '--cd_to_logdir '
-        cmd += '--logdir {}/logs '.format(logdir)
-    '''
+    if os.environ['NVIDIA_INTERNAL']:
+        cmd += '--name {} '.format(job_name)
+        if 'submit_job' in cmd:
+            cmd += '--cd_to_logdir '
+            cmd += '--logdir {}/logs '.format(logdir)
 
     cmd += expand_resources(resources)
     cmd += expand_hparams(hparams)
