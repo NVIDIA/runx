@@ -10,15 +10,17 @@ runx helps to automate common tasks while doing research:
 
 ## Quick-start Installation
 
+Install with pip:
+```
+> pip install runx
+```
+
 Install with source:
 ```
 > git clone https://github.com/NVIDIA/runx
 > cd runx
 > python setup.py install --user
 ```
-
-Install using pip
-TBD
 
 ## Introduction: a simple example
 Suppose you have an existing project that you call as follows:
@@ -252,7 +254,7 @@ For example:
 
 You can do this with hparams defined as follows:
 ```yaml
-hparams: [
+HPARAMS: [
   {
    logdir: LOGDIR,
    adam: true,
