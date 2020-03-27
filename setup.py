@@ -10,7 +10,7 @@ with open('requirements.txt') as f:
 parent = Path(__file__).resolve().parent
 setup(
     name="runx",
-    version="0.0.1",
+    version="0.0.2",
     author="Andrew Tao",
     author_email="atao@nvidia.com",
     description="runx - experiment manager for machine learning research",
