@@ -1,38 +1,28 @@
 from pathlib import Path
-import setuptools
-
-try:
-    from pl.utils.deploy import get_version, get_package_requirements
-except ImportError:
-    print("pl.utils.deploy not found, version number and requirements not valid for upload")
-    # Useful for debugging
-    def get_version(*args, **kwargs):
-        return "0.0.0" 
-
-    def get_package_requirements(*args, **kwargs):
-        return []
+from setuptools import setup, find_packages
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+with open('requirements.txt') as f:
+    requirements = f.read().splitlines()
+
 parent = Path(__file__).resolve().parent
-setuptools.setup(
+setup(
     name="runx",
-    version=get_version(version_path=parent / ".version"),
+    version="0.0.1",
     author="Andrew Tao",
     author_email="atao@nvidia.com",
     description="runx - experiment manager for machine learning research",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/NVIDIA/runx",
-    packages=setuptools.find_packages(),
+    packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    install_requires=get_package_requirements(parent / "requirements.txt",
-                                              start_flag="start package requirements"),
+    install_requires=requirements,
     python_requires='>=3.6',
-    zip_safe=False
 )

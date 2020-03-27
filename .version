@@ -1,5 +1,0 @@
-# Update this version file on the master branch to trigger a deployment to Artifactory
-# If need be, modify this line to trigger a version bump.
-
-# Versions should use the following scheme: MAJOR.MINOR.PATCH
-0.0.9
