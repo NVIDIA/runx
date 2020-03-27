@@ -1,0 +1,5 @@
+CMD: "cd LOGDIR/code; PYTHONPATH=LOGDIR/code exec python imgnet.py /data/ImageNet"
+
+HPARAMS:
+   lr: [0.1, 0.05]
+   logdir: LOGDIR
