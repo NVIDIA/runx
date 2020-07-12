@@ -106,17 +106,19 @@ class LogX(object):
             else:
                 self.logdir = os.path.join(logroot, 'default')
 
-        # confirm target log directory exists
-        if not os.path.isdir(self.logdir):
-            os.makedirs(self.logdir, exist_ok=True)
+        if self.rank0:
+            # confirm target log directory exists
+            if not os.path.isdir(self.logdir):
+                os.makedirs(self.logdir, exist_ok=True)
 
-        if hparams is not None:
-            save_hparams(hparams, self.logdir)
+            # save hparams
+            if hparams is not None:
+                save_hparams(hparams, self.logdir)
 
-        # Tensorboard file
-        if self.rank0 and tensorboard:
-            self.tb_writer = SummaryWriter(log_dir=self.logdir,
-                                           flush_secs=1)
+            # Tensorboard file
+            if tensorboard:
+                self.tb_writer = SummaryWriter(log_dir=self.logdir,
+                                            flush_secs=1)
         else:
             self.tb_writer = None
 
