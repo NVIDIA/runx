@@ -135,6 +135,8 @@ class LogX(object):
             post_hook=self._flush_tensorboard,
         )
 
+        self.epoch = defaultdict(lambda: 0)
+
         if not self.rank0:
             return
 
@@ -157,7 +159,7 @@ class LogX(object):
         if self.best_ckpt_fn:
             best_chk = torch.load(self.best_ckpt_fn, map_location='cpu')
             self.best_metric = best_chk.get('__metric', None)
-        self.epoch = defaultdict(lambda: 0)
+        
         self.no_timestamp = no_timestamp
 
         # Initial timestamp, so that epoch time calculation is correct
@@ -190,7 +192,7 @@ class LogX(object):
             return
 
         print(msg)
-        
+
         if hasattr(self, "log_file"):
             self.log_file.write(msg + '\n')
             self.log_file.flush()
