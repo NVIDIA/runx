@@ -190,8 +190,10 @@ class LogX(object):
             return
 
         print(msg)
-        self.log_file.write(msg + '\n')
-        self.log_file.flush()
+        
+        if hasattr(self, "log_file"):
+            self.log_file.write(msg + '\n')
+            self.log_file.flush()
 
     def add_image(self, path, img, step=None):
         '''
