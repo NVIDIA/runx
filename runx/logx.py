@@ -232,6 +232,9 @@ class LogX(object):
         """
         if not self.rank0:
             return
+        
+        if not hasattr(self, "metrics_writer"):
+            return
 
         # define canonical phase
         if phase in trn_names:
