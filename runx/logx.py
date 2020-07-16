@@ -230,10 +230,7 @@ class LogX(object):
             metrics: dictionary of metrics to record
             global_step: (optional) epoch or iteration number
         """
-        if not self.rank0:
-            return
-        
-        if not hasattr(self, "metrics_writer"):
+        if (not self.rank0) or (not hasattr(self, "metrics_writer")):
             return
 
         # define canonical phase
