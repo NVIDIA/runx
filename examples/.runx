@@ -1,0 +1,20 @@
+# runx configuration file.
+# 
+# LOGROOT should point where you want log output to go
+# 
+# All fields under myfarm describe how to launch batch jobs in a compute farm.
+# If you just want to run interactively, you don't need to worry about this.
+# 
+# SUBMIT_CMD is the job launcher command (your farm must have one).
+# All RESOURCE items are simply arguments to SUBMIT_CMD.
+
+LOGROOT: ./logs
+
+FARM: myfarm
+
+myfarm:
+    SUBMIT_CMD: <my_farm_launcher>
+    RESOURCES:
+        image: <some docker image>
+        gpu: 1
+        mem: 32
