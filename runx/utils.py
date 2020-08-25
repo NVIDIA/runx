@@ -45,14 +45,14 @@ def read_item(config, key):
     return config[key]
 
 
-def read_global_config():
+def read_config_file():
+    local_config_fn = './.runx'
     home = os.path.expanduser('~')
-    cwd_config_fn = './.runx'
-    home_config_fn = '{}/.config/runx.yml'.format(home)
-    if os.path.isfile(cwd_config_fn):
-        config_fn = cwd_config_fn
-    elif os.path.exists(home_config_fn):
-        config_fn = home_config_fn
+    global_config_fn = '{}/.config/runx.yml'.format(home)
+    if os.path.isfile(local_config_fn):
+        config_fn = local_config_fn
+    elif os.path.exists(global_config_fn):
+        config_fn = global_config_fn
     else:
         raise('can\'t find file ./.runx or ~/.config/runx.yml config files')
     if 'FullLoader' in dir(yaml):
@@ -67,7 +67,7 @@ def read_config(args_farm):
     read the global config
     pull the farm portion and merge with global config
     '''
-    global_config = read_global_config()
+    global_config = read_config_file()
 
     merged_config = {}
     merged_config['LOGROOT'] = read_item(global_config, 'LOGROOT')
@@ -92,7 +92,7 @@ def read_config(args_farm):
 
 
 def get_logroot():
-    global_config = read_global_config()
+    global_config = read_config_file()
     return read_item(global_config, 'LOGROOT')
 
 

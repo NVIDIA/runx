@@ -45,13 +45,18 @@ from .utils import read_config, save_hparams
 
 
 parser = argparse.ArgumentParser(description='Experiment runner')
-parser.add_argument('exp_yml', type=str, help='experiment yaml file')
-parser.add_argument('--tag', type=str, default=None, help='tag label for run')
-parser.add_argument('--no_run', '-n', action='store_true', help='don\'t run')
+parser.add_argument('exp_yml', type=str,
+                    help='experiment yaml file')
+parser.add_argument('--tag', type=str, default=None,
+                    help='tag label for run')
+parser.add_argument('--no_run', '-n', action='store_true',
+                    help='don\'t run')
+parser.add_argument('--interactive', '-i', action='store_true',
+                    help='run interactively instead of submitting to farm')
 parser.add_argument('--no_cooldir', action='store_true',
                     help='no coolname, no datestring')
-parser.add_argument('--farm', type=str, default=None, help=(
-    'Select farm for workstation submission'))
+parser.add_argument('--farm', type=str, default=None,
+                    help='Select farm for workstation submission')
 args = parser.parse_args()
 
 
@@ -83,7 +88,6 @@ def expand_hparams(hparams):
                 cmd += '--{} '.format(field)
         elif val != 'None':
             cmd += '--{} {} '.format(field, val)
-    cmd += '\''
     return cmd
 
 
@@ -97,26 +101,45 @@ def exec_cmd(cmd):
         print(message)
 
 
-def construct_cmd(cmd, hparams, resources, job_name, logdir):
+def construct_cmd(cmd, hparams):
     """
-    Expand the hyperparams into a commandline
+    :cmd: farm submission command
+    :hparams: hyperparams for training command
     """
-    ######################################################################
-    # You may wish to customize this function for your own needs
-    ######################################################################
-    if os.environ.get('NVIDIA_INTERNAL'):
-        cmd += '--name {} '.format(job_name)
-        if 'submit_job' in cmd:
-            cmd += '--cd_to_logdir '
-            cmd += '--logdir {}/logs '.format(logdir)
-
-    cmd += expand_resources(resources)
-    cmd += expand_hparams(hparams)
-
-    if args.no_run:
-        print(cmd)
-
+    cmd += ' ' + expand_hparams(hparams)
     return cmd
+
+
+def make_farm_cmd(submit_cmd, train_cmd, job_name, resources, logdir):
+    """
+    This function builds a farm submission command.
+
+    We have some custom code here that's important to make this work
+    with Nvidia's farm, but it should be easy to customize this routine
+    for your needs.
+
+    :submit_cmd: The executable to submit your job to the farm
+
+    All of the following inputs are passed as arguments to the submit_cmd:
+
+    :resources: Resources for the submission command, things like
+                node count, GPUs, memory, etc ...
+    :job_name: The name of the job
+    :logdir: the target log directory
+    :train_cmd: the training command itself
+    """
+    preface = f'cd {logdir}/code; PYTHONPATH={logdir}/code; exec '
+    cmd = preface + train_cmd
+    
+    if os.environ.get('NVIDIA_INTERNAL'):
+        submit_cmd += '--name {} '.format(job_name)
+        submit_cmd += '--logdir {}/gcf_log '.format(logdir)
+
+    submit_cmd += expand_resources(resources)
+
+    if os.environ.get('NVIDIA_INTERNAL'):
+        submit_cmd += f'--command \' {cmd} \''
+    return submit_cmd
 
 
 def save_cmd(cmd, logdir):
@@ -239,6 +262,9 @@ def hacky_substitutions(hparams, resource_copy, logdir, runroot):
     if 'SUBMIT_JOB.NODES' in hparams:
         resource_copy['nodes'] = hparams['SUBMIT_JOB.NODES']
         del hparams['SUBMIT_JOB.NODES']
+    if 'SUBMIT_JOB.PARTITION' in hparams:
+        resource_copy['partition'] = hparams['SUBMIT_JOB.PARTITION']
+        del hparams['SUBMIT_JOB.PARTITION']
 
     # Record the directory from whence the experiments were launched
     hparams_out['srcdir'] = runroot
@@ -259,6 +285,10 @@ def get_tag(hparams):
         hparams['RUNX.TAG'] = tag_val
         args.tag = tag_val
         del hparams['RUNX.TAG']
+
+
+def skip_run(hparams):
+    return 'RUNX.SKIP' in hparams and hparams['RUNX.SKIP']
 
 
 def get_code_ignore_patterns(experiment):
@@ -282,7 +312,6 @@ def run_yaml(experiment, exp_name, runroot):
 
     # Build the args that the submit_cmd will see
     yaml_hparams = OrderedDict()
-    yaml_hparams['command'] = '\'{}'.format(experiment['CMD'])
 
     # Add yaml_hparams
     for k, v in experiment['HPARAMS'].items():
@@ -298,29 +327,42 @@ def run_yaml(experiment, exp_name, runroot):
 
         # hparams to use for experiment
         hparams = {k: v for k, v in zip(hparam_keys, hparam_vals)}
+        if skip_run(hparams):
+            continue
         get_tag(hparams)
 
         job_name, logdir, coolname, expdir = make_cool_names(exp_name, logroot)
         resource_copy = resources.copy()
         hparams_out = hacky_substitutions(hparams, resource_copy, logdir,
                                           runroot)
-        cmd = construct_cmd(submit_cmd, hparams,
-                            resource_copy, job_name, logdir)
+        experiment_cmd = experiment['CMD']
+        cmd = construct_cmd(experiment_cmd, hparams)
 
-        if not args.no_run:
+        if args.interactive:
+            if args.no_run:
+                print(cmd)
+                continue
+            else:
+                exec_cmd(cmd)
+        else:
+            cmd = make_farm_cmd(submit_cmd, cmd, job_name, resource_copy, logdir)
+
+            if args.no_run:
+                print(cmd)
+                continue
+
             # copy code to NFS-mounted share
             copy_code(logdir, runroot, code_ignore_patterns)
 
             # save some meta-data from run
             save_cmd(cmd, logdir)
-            save_hparams(hparams_out, logdir)
 
             subprocess.call(['chmod', '-R', 'a+rw', expdir])
             os.chdir(logdir)
 
             print('Submitting job {}'.format(job_name))
             exec_cmd(cmd)
-
+            
 
 def run_experiment(exp_fn):
     """

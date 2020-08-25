@@ -1,9 +1,0 @@
-LOGROOT: /home/logs
-FARM: bigfarm
-
-bigfarm:
-  SUBMIT_CMD: 'submit_job'
-  RESOURCES:
-     gpu: 2
-     cpu: 16
-     mem: 128

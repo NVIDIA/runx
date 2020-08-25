@@ -1,12 +1,4 @@
-RESOURCES:
-   image: my-docker-image:1.0
-   partition: batch
-   gpu: 1
-   cpu: 8
-   mem: 64
-   duration: 1
-
-CMD: cd LOGDIR/code; PYTHONPATH=LOGDIR/code exec python mnist.py
+CMD: "python mnist.py"
 
 HPARAMS: [
   {

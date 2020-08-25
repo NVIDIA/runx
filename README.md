@@ -33,9 +33,9 @@ But with runx, you would simply define a yaml that defines lists of hyperparams 
 
 Start by creating a yaml file called `sweep.yml`:
 ```yml
-cmd: 'python train.py'
+CMD: 'python train.py'
 
-hparams:
+HPARAMS:
   lr: [0.01, 0.02]
   solver: ['sgd', 'adam']
 ```
@@ -43,19 +43,21 @@ hparams:
 Now you can run the sweep with runx:
 
 ```bash
-> python -m runx.runx sweep.yml
+ > python -m runx.runx sweep.yml -i
 
 python train.py --lr 0.01 --solver sgd
 python train.py --lr 0.01 --solver adam
 python train.py --lr 0.02 --solver sgd
-python train.py --lr 0.02 --solver adam
+python train.py --lr 0.02 --solver adam 
 ```
 You can see that runx automatically computes the cross product of all hyperparameters, which in this
 case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with
 the training command.
 
-runx is intended to be used to launch batch jobs to a farm. Because running many training runs
-interactively would take a long time! 
+-n - this means don't run, just print the command
+-i - interactive (as opposed to batch)
+
+runx is intended to be used to launch batch jobs to a farm. 
 Farm support is simple. Create a .runx file that configures the farm:
 
 ```yaml

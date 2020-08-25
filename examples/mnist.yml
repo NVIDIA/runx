@@ -1,4 +1,4 @@
-CMD: cd LOGDIR/code; PYTHONPATH=LOGDIR/code exec python mnist.py
+CMD: "python mnist.py"
 
 HPARAMS:
    lr: [0.01, 0.02]

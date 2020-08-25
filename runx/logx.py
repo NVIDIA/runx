@@ -110,7 +110,7 @@ class LogX(object):
         if not os.path.isdir(self.logdir):
             os.makedirs(self.logdir, exist_ok=True)
 
-        if hparams is not None:
+        if hparams is not None and self.rank0:
             save_hparams(hparams, self.logdir)
 
         # Tensorboard file

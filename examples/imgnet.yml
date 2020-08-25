@@ -1,4 +1,4 @@
-CMD: "cd LOGDIR/code; PYTHONPATH=LOGDIR/code exec python imgnet.py"
+CMD: "python imgnet.py"
 
 HPARAMS:
    lr: [0.1, 0.05]
