@@ -101,12 +101,26 @@ def exec_cmd(cmd):
         print(message)
 
 
-def construct_cmd(cmd, hparams):
+def construct_cmd(cmd, hparams, logdir, pythonpath):
     """
+    Build training command by starting with user-supplied 'CMD'
+    and then adding in hyperparameters, which came from expanding the 
+    cross-product of all permutations from the experiment yaml file.
+
+    We always copy the code to the target logdir and run from there.
+
     :cmd: farm submission command
     :hparams: hyperparams for training command
     """
+    # First, add hyperparameters
     cmd += ' ' + expand_hparams(hparams)
+
+    # Expand PYTHONPATH, if necessary
+    if pythonpath is not None:
+        pythonpath = pythonpath.replace('LOGDIR', logdir)
+    else:
+        pythonpath = f'{logdir}/code'
+    cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} exec {cmd}'
     return cmd
 
 
@@ -128,9 +142,6 @@ def make_farm_cmd(submit_cmd, train_cmd, job_name, resources, logdir):
     :logdir: the target log directory
     :train_cmd: the training command itself
     """
-    preface = f'cd {logdir}/code; PYTHONPATH={logdir}/code; exec '
-    cmd = preface + train_cmd
-    
     if os.environ.get('NVIDIA_INTERNAL'):
         submit_cmd += '--name {} '.format(job_name)
         submit_cmd += '--logdir {}/gcf_log '.format(logdir)
@@ -138,7 +149,7 @@ def make_farm_cmd(submit_cmd, train_cmd, job_name, resources, logdir):
     submit_cmd += expand_resources(resources)
 
     if os.environ.get('NVIDIA_INTERNAL'):
-        submit_cmd += f'--command \' {cmd} \''
+        submit_cmd += f'--command \' {train_cmd} \''
     return submit_cmd
 
 
@@ -295,8 +306,10 @@ def get_code_ignore_patterns(experiment):
     if 'CODE_IGNORE_PATTERNS' in experiment:
         code_ignore_patterns = experiment['CODE_IGNORE_PATTERNS']
     else:
-        return ['.git', '*.pyc', 'docs*', 'test*']
+        code_ignore_patterns = '.git,*.pyc,docs*,test*'
 
+    # don't copy checkpoints
+    code_ignore_patterns += ',*.pth'
     code_ignore_patterns = code_ignore_patterns.split(',')
     return code_ignore_patterns
 
@@ -308,6 +321,7 @@ def run_yaml(experiment, exp_name, runroot):
     resources = get_field(experiment, 'RESOURCES')
     submit_cmd = get_field(experiment, 'SUBMIT_CMD') + ' '
     logroot = get_field(experiment, 'LOGROOT')
+    pythonpath = get_field(experiment, 'PYTHONPATH')
     code_ignore_patterns = get_code_ignore_patterns(experiment)
 
     # Build the args that the submit_cmd will see
@@ -336,32 +350,30 @@ def run_yaml(experiment, exp_name, runroot):
         hparams_out = hacky_substitutions(hparams, resource_copy, logdir,
                                           runroot)
         experiment_cmd = experiment['CMD']
-        cmd = construct_cmd(experiment_cmd, hparams)
+        cmd = construct_cmd(experiment_cmd, hparams, logdir, pythonpath)
 
-        if args.interactive:
-            if args.no_run:
-                print(cmd)
-                continue
-            else:
-                exec_cmd(cmd)
-        else:
+        if not args.interactive:
             cmd = make_farm_cmd(submit_cmd, cmd, job_name, resource_copy, logdir)
 
-            if args.no_run:
-                print(cmd)
-                continue
+        if args.no_run:
+            print(cmd)
+            continue
 
-            # copy code to NFS-mounted share
-            copy_code(logdir, runroot, code_ignore_patterns)
+        # copy code to NFS-mounted share
+        copy_code(logdir, runroot, code_ignore_patterns)
 
-            # save some meta-data from run
-            save_cmd(cmd, logdir)
+        # save some meta-data from run
+        save_hparams(hparams, logdir)
+        save_cmd(cmd, logdir)
 
-            subprocess.call(['chmod', '-R', 'a+rw', expdir])
-            os.chdir(logdir)
+        subprocess.call(['chmod', '-R', 'a+rw', expdir])
+        os.chdir(logdir)
 
+        if args.interactive:
+            print('Running job {}'.format(job_name))
+        else:
             print('Submitting job {}'.format(job_name))
-            exec_cmd(cmd)
+        exec_cmd(cmd)
             
 
 def run_experiment(exp_fn):

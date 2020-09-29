@@ -89,8 +89,7 @@ class LogX(object):
           log from rank 0
         - coolname - generate a unique directory name underneath logdir, else
           use logdir as output directory
-        - hparams - only use if not launching jobs with runx, which also saves
-          the hparams.
+        - hparams - needed if you want summarize with sumx
         - eager_flush - call `flush` after every tensorboard write
         '''
         self.rank0 = (global_rank == 0)

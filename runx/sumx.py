@@ -310,7 +310,8 @@ def summarize_experiment(parent_dir):
     metrics = get_metrics(runs)
 
     if not len(runs) or not len(metrics):
-        print('No valid experiments found for {}'.format(parent_dir))
+        print('No valid experiments found for {} {} {}'.format(parent_dir,
+            len(runs), len(metrics)))
         return
 
     # a list of hparams to list out
