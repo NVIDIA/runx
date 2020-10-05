@@ -2,5 +2,5 @@ CMD: "python mnist.py"
 
 HPARAMS:
    lr: [0.01, 0.02]
-   momentum: [0.5, 0.25]
+   momentum: 0.5
    logdir: LOGDIR

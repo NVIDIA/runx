@@ -94,6 +94,9 @@ This directory is passed to your training script via a special field: `LOGDIR`. 
 script must use this path and write it's output there.
 
 ```yml
+# (optional) PYTHONPATH: color separated list, just like the env var
+# PYTHONPATH: LOGDIR/code:LOGDIR/code/lib
+
 CMD: 'python train.py'
 
 HPARAMS:
@@ -364,3 +367,35 @@ A few features worth knowing about:
 * sumx tells you the average epoch time, which is handy if you are monitoring training speed
 * use the optional `--ignore` flag to limit what fields sumx prints out
 
+## NGC Support
+NGC support is now standard. Your `.runx` file should look like the following.
+
+```yaml
+
+LOGROOT: /path/to/logroot
+
+FARM: ngc
+
+ngc:
+    NGC_LOGROOT: /path/to/ngc_logroot
+    WORKSPACE: <your ngc workspace>
+    SUBMIT_CMD: 'ngc batch run'
+    RESOURCES:
+       image: nvidian/pytorch:19.10-py3
+       instance: dgx1v.16g.1.norm
+       ace: nv-us-west-2
+       team: adlr
+       result: /result
+```
+
+Necessary steps:
+ # Fill out a path to LOGROOT, which is a client-side staging directory for the log directory
+ # Create a RW NGC workspace and fill in `WORKSPACE` with it
+ # Mount this workspace on your local machine and fill in `NGC_LOGROOT` with this path. When the
+   job is launched, this is also the path used to mount the workspace on the running instance.
+ # Fill out any necessary fields under `RESOURCES`. Recall that these parameters are passed on
+   to the `SUBMIT_CMD`, which must be `ngc batch run`.
+
+You should be able to launch jobs to NGC using this configuration.
+When jobs write their results, you should also be able to see the results in the mounted workspace,
+and then you should be able to run runx.sumx in order to summarize the results of those runs.

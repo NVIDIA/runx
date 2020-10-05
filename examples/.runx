@@ -1,20 +1,22 @@
 # runx configuration file.
 # 
-# LOGROOT should point where you want log output to go
-# 
-# All fields under myfarm describe how to launch batch jobs in a compute farm.
-# If you just want to run interactively, you don't need to worry about this.
-# 
+# LOGROOT is where log output should go when running locally
+# NGC_LOGROOT is where you've mounted your NGC RW workspace on your local machine
+# WORKSPACE is your NGC RW workspace
 # SUBMIT_CMD is the job launcher command (your farm must have one).
-# All RESOURCE items are simply arguments to SUBMIT_CMD.
+# RESOURCES - these are presented as args to the SUBMIT_CMD, so adjust as needed
 
-LOGROOT: ./logs
+LOGROOT: /path/to/logroot
 
-FARM: myfarm
+FARM: ngc
 
-myfarm:
-    SUBMIT_CMD: <my_farm_launcher>
+ngc:
+    NGC_LOGROOT: /path/to/your/mounted/workspace
+    WORKSPACE: <your-workspace>
+    SUBMIT_CMD: 'submit_job'
     RESOURCES:
-        image: <some docker image>
-        gpu: 1
-        mem: 32
+       image: nvidian/pytorch:19.10-py3
+       gpu: 1
+       instance: dgx1v.16g.1.norm
+       ace: nv-us-west-2
+       result: /result

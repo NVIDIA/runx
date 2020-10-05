@@ -41,7 +41,9 @@ import yaml
 import argparse
 import itertools
 
-from .utils import read_config, save_hparams
+from .utils import read_config, save_hparams, exec_cmd
+from .config import cfg
+from .farm import build_farm_cmd, upload_to_ngc
 
 
 parser = argparse.ArgumentParser(description='Experiment runner')
@@ -60,23 +62,6 @@ parser.add_argument('--farm', type=str, default=None,
 args = parser.parse_args()
 
 
-def expand_resources(resources):
-    """
-    Construct the submit_job arguments from the resource dict
-    """
-    cmd = ''
-    for field, val in resources.items():
-        if type(val) is bool:
-            if val is True:
-                cmd += '--{} '.format(field)
-        elif type(val) is list or type(val) is tuple:
-            for mp in val:
-                cmd += '--{} {} '.format(field, mp)
-        else:
-            cmd += '--{} {} '.format(field, val)
-    return cmd
-
-
 def expand_hparams(hparams):
     """
     Construct the training script args from the hparams
@@ -91,17 +76,7 @@ def expand_hparams(hparams):
     return cmd
 
 
-def exec_cmd(cmd):
-    """
-    Execute a command and print stderr/stdout to the console
-    """
-    result = subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)
-    if result.stderr:
-        message = result.stderr.decode("utf-8")
-        print(message)
-
-
-def construct_cmd(cmd, hparams, logdir, pythonpath):
+def construct_cmd(cmd, hparams, logdir):
     """
     Build training command by starting with user-supplied 'CMD'
     and then adding in hyperparameters, which came from expanding the 
@@ -116,41 +91,19 @@ def construct_cmd(cmd, hparams, logdir, pythonpath):
     cmd += ' ' + expand_hparams(hparams)
 
     # Expand PYTHONPATH, if necessary
-    if pythonpath is not None:
+    if cfg.PYTHONPATH is not None:
         pythonpath = pythonpath.replace('LOGDIR', logdir)
     else:
         pythonpath = f'{logdir}/code'
-    cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} exec {cmd}'
+
+    # For signalling reasons, we have to insert the exec here when using submit_job.
+    # Nvidia-internal thing.
+    exec_str = ''
+    if 'submit_job' in cfg.SUBMIT_CMD:
+        exec_str = 'exec'
+        
+    cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} {exec_str} {cmd}'
     return cmd
-
-
-def make_farm_cmd(submit_cmd, train_cmd, job_name, resources, logdir):
-    """
-    This function builds a farm submission command.
-
-    We have some custom code here that's important to make this work
-    with Nvidia's farm, but it should be easy to customize this routine
-    for your needs.
-
-    :submit_cmd: The executable to submit your job to the farm
-
-    All of the following inputs are passed as arguments to the submit_cmd:
-
-    :resources: Resources for the submission command, things like
-                node count, GPUs, memory, etc ...
-    :job_name: The name of the job
-    :logdir: the target log directory
-    :train_cmd: the training command itself
-    """
-    if os.environ.get('NVIDIA_INTERNAL'):
-        submit_cmd += '--name {} '.format(job_name)
-        submit_cmd += '--logdir {}/gcf_log '.format(logdir)
-
-    submit_cmd += expand_resources(resources)
-
-    if os.environ.get('NVIDIA_INTERNAL'):
-        submit_cmd += f'--command \' {train_cmd} \''
-    return submit_cmd
 
 
 def save_cmd(cmd, logdir):
@@ -226,7 +179,7 @@ def do_keyword_expansion(alist, pairs):
         raise
 
 
-def make_cool_names(exp_name, logroot):
+def make_cool_names():
     tagname = args.tag + '_' if args.tag else ''
     datestr = datetime.now().strftime("_%Y.%m.%d_%H.%M")
     if args.no_cooldir:
@@ -235,14 +188,14 @@ def make_cool_names(exp_name, logroot):
         coolname = tagname + generate_slug(2) + datestr
 
     # Experiment directory is the parent of N runs
-    expdir = os.path.join(logroot, exp_name)
+    expdir = os.path.join(cfg.LOGROOT, cfg.EXP_NAME)
 
     # Each run has a logdir
     logdir_name = coolname
     logdir = os.path.join(expdir, logdir_name)
 
     # Jobname is a unique name for the batch job
-    job_name = '{}_{}'.format(exp_name, coolname)
+    job_name = '{}_{}'.format(cfg.EXP_NAME, coolname)
     return job_name, logdir, logdir_name, expdir
 
 
@@ -308,21 +261,19 @@ def get_code_ignore_patterns(experiment):
     else:
         code_ignore_patterns = '.git,*.pyc,docs*,test*'
 
-    # don't copy checkpoints
-    code_ignore_patterns += ',*.pth'
+    code_ignore_patterns += ',*.pth' # don't copy checkpoints
     code_ignore_patterns = code_ignore_patterns.split(',')
     return code_ignore_patterns
 
 
-def run_yaml(experiment, exp_name, runroot):
+def run_yaml(experiment, runroot):
     """
     Run an experiment, expand hparams
     """
     resources = get_field(experiment, 'RESOURCES')
-    submit_cmd = get_field(experiment, 'SUBMIT_CMD') + ' '
-    logroot = get_field(experiment, 'LOGROOT')
-    pythonpath = get_field(experiment, 'PYTHONPATH')
     code_ignore_patterns = get_code_ignore_patterns(experiment)
+    ngc = 'ngc' in cfg.FARM
+    experiment_cmd = experiment['CMD']
 
     # Build the args that the submit_cmd will see
     yaml_hparams = OrderedDict()
@@ -345,16 +296,22 @@ def run_yaml(experiment, exp_name, runroot):
             continue
         get_tag(hparams)
 
-        job_name, logdir, coolname, expdir = make_cool_names(exp_name, logroot)
+        job_name, logdir, coolname, expdir = make_cool_names()
         resource_copy = resources.copy()
-        hparams_out = hacky_substitutions(hparams, resource_copy, logdir,
-                                          runroot)
-        experiment_cmd = experiment['CMD']
-        cmd = construct_cmd(experiment_cmd, hparams, logdir, pythonpath)
+
+        if ngc:
+            ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
+            hparams_out = hacky_substitutions(
+                hparams, resource_copy, ngc_logdir, runroot)
+            cmd = construct_cmd(experiment_cmd, hparams, ngc_logdir)
+        else:
+            hparams_out = hacky_substitutions(
+                hparams, resource_copy, logdir, runroot)
+            cmd = construct_cmd(experiment_cmd, hparams, logdir)
 
         if not args.interactive:
-            cmd = make_farm_cmd(submit_cmd, cmd, job_name, resource_copy, logdir)
-
+            cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
+            
         if args.no_run:
             print(cmd)
             continue
@@ -363,8 +320,11 @@ def run_yaml(experiment, exp_name, runroot):
         copy_code(logdir, runroot, code_ignore_patterns)
 
         # save some meta-data from run
-        save_hparams(hparams, logdir)
         save_cmd(cmd, logdir)
+
+        # upload to remote farm
+        if ngc:
+            upload_to_ngc(logdir)
 
         subprocess.call(['chmod', '-R', 'a+rw', expdir])
         os.chdir(logdir)
@@ -381,15 +341,7 @@ def run_experiment(exp_fn):
     Run an experiment, given a global config file + an experiment file.
     The global config sets defaults that are inherited by the experiment.
     """
-    global_config = read_config(args.farm)
-    exp_config = yaml.load(open(args.exp_yml), Loader=yaml.FullLoader)
-
-    # Inherit global config into experiment config:
-    experiment = global_config
-    for k, v in exp_config.items():
-        experiment[k] = v
-
-    exp_name = os.path.splitext(os.path.basename(args.exp_yml))[0]
+    experiment = read_config(args.farm, args.exp_yml)
 
     assert 'HPARAMS' in experiment, 'experiment file is missing hparams'
 
@@ -408,9 +360,9 @@ def run_experiment(exp_fn):
             experiment_copy = experiment.copy()
             experiment_copy['HPARAMS'] = hparams
 
-            run_yaml(experiment_copy, exp_name, runroot)
+            run_yaml(experiment_copy, runroot)
     else:
-        run_yaml(experiment, exp_name, runroot)
+        run_yaml(experiment, runroot)
 
 
 def main():

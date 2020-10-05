@@ -37,7 +37,8 @@ import time
 import json
 import csv
 
-from .utils import get_logroot
+from .config import cfg
+from .utils import get_logroot, read_config
 
 
 parser = argparse.ArgumentParser(
@@ -104,7 +105,7 @@ def get_hparams(runs):
 
 def load_csv(csv_fn):
     fp = open(csv_fn)
-    csv_reader = csv.reader(fp, delimiter=',')
+    csv_reader = csv.reader((x.replace('\0', '') for x in fp), delimiter=',')
     return list(csv_reader)
 
 
@@ -310,8 +311,7 @@ def summarize_experiment(parent_dir):
     metrics = get_metrics(runs)
 
     if not len(runs) or not len(metrics):
-        print('No valid experiments found for {} {} {}'.format(parent_dir,
-            len(runs), len(metrics)))
+        print('No valid experiments found for {}'.format(parent_dir))
         return
 
     # a list of hparams to list out
@@ -390,11 +390,15 @@ def summarize_experiment(parent_dir):
 
 def main():
 
-    if args.logroot:
-        logroot = args.logroot
-    else:
-        logroot = get_logroot()
+    read_config(args_farm=None, args_exp_yml=None)
 
+    if args.logroot is not None:
+        logroot = args.logroot
+    elif 'ngc' in cfg.FARM:
+        logroot = cfg.NGC_LOGROOT
+    else:
+        logroot = cfg.LOGROOT
+        
     for adir in args.dirs:
         full_path = os.path.join(logroot, adir)
         summarize_experiment(full_path)

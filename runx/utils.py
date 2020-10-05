@@ -33,16 +33,43 @@ import shlex
 import json
 import socket
 
+import subprocess
 from subprocess import call, getoutput, DEVNULL
+from .config import cfg
+
+
+def exec_cmd(cmd):
+    """
+    Execute a command and print stderr/stdout to the console
+    """
+    print(cmd)
+    result = subprocess.run(cmd, stderr=subprocess.PIPE, shell=True)
+    if result.stderr:
+        message = result.stderr.decode("utf-8")
+        print(message)
 
 
 trn_names = ('trn', 'train', 'training')
 val_names = ('val', 'validate', 'validation', 'test')
 
 
-def read_item(config, key):
-    assert key in config, 'couldn\'t find {} in config'.format(key)
-    return config[key]
+def set_config(out_config, in_config, key, optional=False):
+    if key in in_config:
+        out_config[key] = in_config[key]
+        return
+    elif optional:
+        return
+    else:
+        raise 'couldn\'t find {} in config'.format(key)
+
+
+def read_config_item(config, key, optional=False):
+    if key in config:
+        return config[key]
+    elif optional:
+        return None
+    else:
+        raise f'can\'t find {key} in config'
 
 
 def read_config_file():
@@ -62,38 +89,45 @@ def read_config_file():
     return global_config
 
 
-def read_config(args_farm):
+def read_config(args_farm, args_exp_yml):
     '''
-    read the global config
-    pull the farm portion and merge with global config
+    Merge the global and experiment config files into a single config
     '''
     global_config = read_config_file()
 
-    merged_config = {}
-    merged_config['LOGROOT'] = read_item(global_config, 'LOGROOT')
-    if 'CODE_IGNORE_PATTERNS' in global_config:
-        merged_config['CODE_IGNORE_PATTERNS'] = \
-            global_config['CODE_IGNORE_PATTERNS']
-
     if args_farm is not None:
-        farm_name = args_farm
-    else:
-        assert 'FARM' in global_config, \
-            'FARM not defined in .runx'
-        farm_name = global_config['FARM']
+        global_config['FARM'] = args_farm
 
-    assert farm_name in global_config, \
-        f'{farm_name} not found in .runx'
+    farm_name = read_config_item(global_config, 'FARM')
+    assert farm_name in global_config, f'Can\'t find farm {farm_name} defined in .runx'
 
+    # Dereference the farm config items
     for k, v in global_config[farm_name].items():
-        merged_config[k] = v
+        global_config[k] = v
 
-    return merged_config
+    # Inherit global config into experiment config:
+    experiment = global_config
+    if args_exp_yml is not None:
+        exp_config = yaml.load(open(args_exp_yml), Loader=yaml.FullLoader)
+        for k, v in exp_config.items():
+            experiment[k] = v
+
+    cfg.FARM = read_config_item(experiment, 'FARM')
+    cfg.LOGROOT = read_config_item(experiment, 'LOGROOT')
+    cfg.SUBMIT_CMD = read_config_item(experiment, 'SUBMIT_CMD')
+    cfg.PYTHONPATH = read_config_item(experiment, 'PYTHONPATH', optional=True)
+    if args_exp_yml is not None:
+        cfg.EXP_NAME = os.path.splitext(os.path.basename(args_exp_yml))[0]
+    if 'ngc' in cfg.FARM:
+        cfg.NGC_LOGROOT = read_config_item(experiment, 'NGC_LOGROOT')
+        cfg.WORKSPACE = read_config_item(experiment, 'WORKSPACE')
+
+    return experiment
 
 
 def get_logroot():
     global_config = read_config_file()
-    return read_item(global_config, 'LOGROOT')
+    return read_config_item(global_config, 'LOGROOT')
 
 
 def get_bigfiles(root):
