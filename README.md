@@ -389,12 +389,13 @@ ngc:
 ```
 
 Necessary steps:
- # Fill out a path to LOGROOT, which is a client-side staging directory for the log directory
- # Create a RW NGC workspace and fill in `WORKSPACE` with it
- # Mount this workspace on your local machine and fill in `NGC_LOGROOT` with this path. When the
-   job is launched, this is also the path used to mount the workspace on the running instance.
- # Fill out any necessary fields under `RESOURCES`. Recall that these parameters are passed on
-   to the `SUBMIT_CMD`, which must be `ngc batch run`.
+* Fill out a path to LOGROOT, which is a client-side staging directory for the log directory
+* Create a RW NGC workspace and fill in `WORKSPACE` with it
+* Mount this workspace on your local machine and fill in `NGC_LOGROOT` with this path. When the
+  job is launched, this is also the path used to mount the workspace on the running instance.
+* Fill out any necessary fields under `RESOURCES`. Recall that these parameters are passed on
+  to the `SUBMIT_CMD`, which must be `ngc batch run`.
+
 
 You should be able to launch jobs to NGC using this configuration.
 When jobs write their results, you should also be able to see the results in the mounted workspace,
