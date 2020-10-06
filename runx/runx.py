@@ -92,6 +92,7 @@ def construct_cmd(cmd, hparams, logdir):
 
     # Expand PYTHONPATH, if necessary
     if cfg.PYTHONPATH is not None:
+        pythonpath = cfg.PYTHONPATH
         pythonpath = pythonpath.replace('LOGDIR', logdir)
     else:
         pythonpath = f'{logdir}/code'
