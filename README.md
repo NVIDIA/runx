@@ -384,7 +384,6 @@ ngc:
        image: nvidian/pytorch:19.10-py3
        instance: dgx1v.16g.1.norm
        ace: nv-us-west-2
-       team: adlr
        result: /result
 ```
 
