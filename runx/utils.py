@@ -116,8 +116,11 @@ def read_config(args_farm, args_exp_yml):
     cfg.LOGROOT = read_config_item(experiment, 'LOGROOT')
     cfg.SUBMIT_CMD = read_config_item(experiment, 'SUBMIT_CMD')
     cfg.PYTHONPATH = read_config_item(experiment, 'PYTHONPATH', optional=True)
+    cfg.SUMMARY_FUNC = read_config_item(experiment, 'SUMMARY_FUNC', optional=True)
+
     if args_exp_yml is not None:
         cfg.EXP_NAME = os.path.splitext(os.path.basename(args_exp_yml))[0]
+
     if 'ngc' in cfg.FARM:
         cfg.NGC_LOGROOT = read_config_item(experiment, 'NGC_LOGROOT')
         cfg.WORKSPACE = read_config_item(experiment, 'WORKSPACE')

@@ -28,7 +28,6 @@ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 """
 from __future__ import print_function
-from tabulate import tabulate
 
 import os
 import copy
@@ -36,7 +35,9 @@ import argparse
 import time
 import json
 import csv
+import importlib
 
+from tabulate import tabulate
 from .config import cfg
 from .utils import get_logroot, read_config
 
@@ -80,6 +81,9 @@ def get_runs(parent_dir):
     Can be any depth of hierarchical tree
     Look for code.tgz file.
     '''
+    assert os.path.exists(parent_dir), \
+        'Couldn\'t find directory {}'.format(parent_dir)
+ 
     runs = []
     for adir in os.listdir(parent_dir):
         run_dir = os.path.join(parent_dir, adir)
@@ -100,7 +104,11 @@ def get_hparams(runs):
         assert os.path.isfile(json_fn), \
             'hparams.json not found in {}'.format(run)
         hparams[run] = load_json(json_fn)
-    return hparams
+
+    # Only hparams that have differring values across runs!
+    uncommon_hparams_names = get_uncommon_hparam_names(hparams)
+
+    return hparams, uncommon_hparams_names
 
 
 def load_csv(csv_fn):
@@ -294,30 +302,28 @@ def get_uncommon_hparam_names(all_runs):
     return uncommon_list
 
 
-def summarize_experiment(parent_dir):
-    '''
-    Summarize an experiment, which can consist of many runs.
-    '''
-    assert os.path.exists(parent_dir), \
-        'Couldn\'t find directory {}'.format(parent_dir)
+def run_summary_func(tablebody):
+    basename, function_name = cfg.SUMMARY_FUNC.split(':')
 
-    # assemble full paths to list of runs
-    runs = get_runs(parent_dir)
+    assert os.path.isfile(basename + '.py'), \
+      f'can\'t find SUMMARY_FUNC file {basename}.py'
 
-    # dict of dicts of hparams
-    hparams = get_hparams(runs)
+    mod = importlib.import_module(basename)
+    assert hasattr(mod, function_name), \
+      f'can\'t find SUMMARY_FUNC function {function_name}'
 
-    # dict of dicts of final test/val metrics
-    metrics = get_metrics(runs)
+    f = getattr(mod, function_name)
+    f(tablebody)
 
-    if not len(runs) or not len(metrics):
+
+def print_summary_table(uncommon_hparams_names, metrics, hparams, parent_dir):
+    """
+    Print a table summarizing all runs.
+    """
+    if not len(metrics):
         print('No valid experiments found for {}'.format(parent_dir))
         return
 
-    # a list of hparams to list out
-    uncommon_hparams_names = get_uncommon_hparam_names(hparams)
-
-    # create header for table
     header = ['run']
     header += uncommon_hparams_names
     first_valid_run = list(metrics.keys())[0]
@@ -370,22 +376,50 @@ def summarize_experiment(parent_dir):
         except:
             print('Some data in table prevented sorting')
             pass
+ 
+    header_plus_table = [header] + tablebody
 
     if args.csv is not None:
-        unf_table = [header] + tablebody
         f = open("{}.csv".format(args.csv), "w+")
-        for row in unf_table:
+        for row in header_plus_table:
             for column in row:
                 f.write("{}, ".format(column))
             f.write("\n")
 
+    if cfg.SUMMARY_FUNC:
+        run_summary_func(header_plus_table)
+        
     # We chop long strings into multiple lines if they contain '.' or '_'
     # This helps keep the output table more compact
     header = [h.replace('.', '\n') for h in header]
     header = [h.replace('_', '\n') for h in header]
 
-    table = [header] + tablebody
-    print(tabulate(table, headers='firstrow', floatfmt='1.2e'))
+    print(tabulate([header] + tablebody, headers='firstrow', floatfmt='1.2e'))
+
+
+def summarize_experiment(parent_dir):
+    '''
+    Summarize an experiment, which can consist of many runs.
+
+    Current code workflow:
+    1. Find list of subdirs that contain metrics files
+    2. Load hparams for each run
+    3. Get final metrics per run
+    4. Get uncommon params across runs
+    5. For each run, read un-params from metrics
+    6. Sort and print summary table
+    '''
+    # List containing full paths to valid runs
+    runs = get_runs(parent_dir)
+
+    # Dict hparams by run, and list of params that differ across runs
+    hparams, uncommon_hparams_names = get_hparams(runs)
+
+    # Get a dict of dicts of final test/val metrics
+    # Could be a subset of all runs.
+    metrics = get_metrics(runs)
+
+    print_summary_table(uncommon_hparams_names, metrics, hparams, parent_dir)
 
 
 def main():

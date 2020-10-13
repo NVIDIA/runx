@@ -54,8 +54,11 @@ You can see that runx automatically computes the cross product of all hyperparam
 case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with
 the training command.
 
+Some helpful options:
+```
 -n - this means don't run, just print the command
 -i - interactive (as opposed to batch)
+```
 
 runx is intended to be used to launch batch jobs to a farm. 
 Farm support is simple. Create a .runx file that configures the farm:
@@ -366,6 +369,21 @@ A few features worth knowing about:
 * sumx tells you what epoch your run is current on
 * sumx tells you the average epoch time, which is handy if you are monitoring training speed
 * use the optional `--ignore` flag to limit what fields sumx prints out
+
+### sumx - SUMMARY_FUNC
+
+sumx support using an external plugin to post-process the summary results.
+In order to add a plugin, add the following to your .runx file:
+```yaml
+SUMMARY_FUNC: mymetrics:summarize
+```
+In this case, the plugin filename is `mymetrics.py` and the summary routine is called `summarize`.
+The input to this function is a data struction that matches the output of sumx, i.e. a table.
+
+This data structure has the following format:
+ - `input_list = [header, line0, line1, ...]`
+ - `header` is a list of strings that define the column labels
+ - Following the header, each successive line of the datastructure contains values for each new run.
 
 ## NGC Support
 NGC support is now standard. Your `.runx` file should look like the following.
