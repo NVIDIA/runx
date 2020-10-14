@@ -273,7 +273,7 @@ def run_yaml(experiment, runroot):
     """
     resources = get_field(experiment, 'RESOURCES')
     code_ignore_patterns = get_code_ignore_patterns(experiment)
-    ngc = 'ngc' in cfg.FARM
+    ngc_batch = 'ngc' in cfg.FARM and not args.interactive
     experiment_cmd = experiment['CMD']
 
     # Build the args that the submit_cmd will see
@@ -300,7 +300,23 @@ def run_yaml(experiment, runroot):
         job_name, logdir, coolname, expdir = make_cool_names()
         resource_copy = resources.copy()
 
-        if ngc:
+        """
+        A few different modes of operation:
+        1. interactive runs
+           a. copy local code to logdir under LOGROOT
+           b. cd to logdir, execute cmd
+
+        2. farm submission: non-NGC
+           In this regime, the LOGROOT is expected to be visible to the farm's compute nodes
+           a. copy local code to logdir under LOGROOT
+           b. call cmd, which should invoke whatever you have specified for SUBMIT_JOB
+
+        3. farm submission: NGC
+           a. copy local code to logdir under LOGROOT
+           b. ngc workspace upload the logdir to NGC_WORKSPACE
+           c. call cmd, which should invoke SUBMIT_JOB==`ngc batch run`
+        """
+        if ngc_batch:
             ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
             hparams_out = hacky_substitutions(
                 hparams, resource_copy, ngc_logdir, runroot)
@@ -324,7 +340,7 @@ def run_yaml(experiment, runroot):
         save_cmd(cmd, logdir)
 
         # upload to remote farm
-        if ngc:
+        if ngc_batch:
             upload_to_ngc(logdir)
 
         subprocess.call(['chmod', '-R', 'a+rw', expdir])
