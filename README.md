@@ -1,12 +1,24 @@
 # runx - An experiment management tool
 
-runx helps to automate common tasks while doing research:
+`runx` helps to automate common tasks while doing research:
 * hyperparameter sweeps
 * logging, tensorboard, checkpoint management
-* per-run unique directory creation
 * experiment summarization
 * code checkpointing
-* easy integration
+* unique, per-run, directory creation
+
+# Table of Contents
+- [Quick-start Installation](#quick-start-installation)
+- [Introduction: a simple example](#introduction--a-simple-example)
+- [runx Architecture](#runx-architecture)
+- [Create a project-specific configuration file](#create-a-project-specific-configuration-file)
+- [Run directory, logfiles](#run-directory--logfiles)
+- [Experiment yaml details](#experiment-yaml-details)
+  * [Booleans](#booleans)
+  * [Lists, Inheritance](#lists--inheritance)
+- [logx - logging, tensorboarding, checkpointing](#logx---logging--tensorboarding--checkpointing)
+- [sumx - summarizing your runs](#sumx---summarizing-your-runs)
+- [NGC Support](#ngc-support)
 
 ## Quick-start Installation
 
@@ -19,17 +31,16 @@ Install with source:
 ```
 > git clone https://github.com/NVIDIA/runx
 > cd runx
-> python setup.py install --user
+> python setup.py .
 ```
 
-## Introduction: a simple example
+## Introduction example
 Suppose you have an existing project that you call as follows:
 
 ```bash
 > python train.py --lr 0.01 --solver sgd
 ```
-To run a hyperparameter sweep, you'd normally have to code up a one-off script to generate the sweep.
-But with runx, you would simply define a yaml that defines lists of hyperparams that you'd like to use.
+To run a hyperparameter sweep, you'd normally have to code up a one-off script to generate the sweep. But with runx, you would simply define a yaml that defines lists of hyperparams that you'd like to use.
 
 Start by creating a yaml file called `sweep.yml`:
 ```yml
@@ -50,16 +61,16 @@ python train.py --lr 0.01 --solver adam
 python train.py --lr 0.02 --solver sgd
 python train.py --lr 0.02 --solver adam 
 ```
-You can see that runx automatically computes the cross product of all hyperparameters, which in this
-case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with
-the training command.
+You can see that runx automatically computes the cross product of all hyperparameters, which in this case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with the training command.
 
--n - this means don't run, just print the command
--i - interactive (as opposed to batch)
+A few useful runx options:
+```
+-n     don't run, just print the command
+-i     interactive mode (as opposed to submitting jobs to a farm)
+```
+### runx is especially useful to launch batch jobs to a farm. 
 
-runx is intended to be used to launch batch jobs to a farm. 
-Farm support is simple. Create a .runx file that configures the farm:
-
+Farm support is simple. First create a .runx file that configures the farm:
 ```yaml
 LOGROOT: /home/logs
 FARM: bigfarm
@@ -71,11 +82,12 @@ bigfarm:
      cpu: 16
      mem: 128
 ```
-You've told it a few things here: where to put the assets for each run, under /home/logs, and
-what command and what resources to use to submit each run to the farm.
+**LOGROOT**: this is where the output of runs should go
+**FARM**: you can define multiple farm targets. This selects which one to use
+**SUBMIT_CMD**: the script you use to launch jobs to a farm
+**RESOURCES**: the arguments to present to SUBMIT_CMD
 
-Now when you call runx, because `FARM` is defined as `bigfarm`, it will use `bigfarm`'s
-definition to perform submissions.
+Now when you run runx, it will generate commands that will attempt to launch jobs to a farm using your SUBMIT_CMD. Notice that we left out the `-i` cmdline arg because now we want to submit jobs and not run them interactively.
 
 ```bash
 > python -m runx.runx sweep.yml
@@ -85,18 +97,14 @@ submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.01 --solver ada
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver sgd"
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver adam"
 ```
-Here, submit_job is a placeholder for your farm submission command.
 
-Finally, we want the results for each training run to go into a unique output/log directory.
-We don't want things like tensorboard files or logfiles to write over each other.
-runx solves this problem by automatically generating a unique output directory per run.
-This directory is passed to your training script via a special field: `LOGDIR`. Your training
-script must use this path and write it's output there.
+### Unique run directories
+We want the results for each training run to go into a unique output/log directory.  We don't want things like tensorboard files or logfiles to write over each other. `runx` solves this problem by automatically generating a unique output directory per run. 
+
+You have access to this unique directory name within your experiment yaml via the special variable: `LOGDIR`. Your training
+script may use this path and write its output there.
 
 ```yml
-# (optional) PYTHONPATH: color separated list, just like the env var
-# PYTHONPATH: LOGDIR/code:LOGDIR/code/lib
-
 CMD: 'python train.py'
 
 HPARAMS:
@@ -105,7 +113,8 @@ HPARAMS:
   logdir: LOGDIR
 ```
 
-Now when we launch the jobs, runx automatically generates unique output directories and passes the paths to your training script:
+In the above experiment yaml, we have passed LOGDIR as an argument to your training script. When we launch the jobs, runx automatically generates unique output directories and passes the paths to your training script:
+
 ```bash
 > python -m runx.runx sweep.yml
 
@@ -115,11 +124,15 @@ submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver sgd
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver adam  --logdir /home/logs/vengeful-jaguar_2020.02.06_14.19"
 ```
 
-After you've run your experiment, you will likely want to summarize the results. 
-Which training run was best?
+## Summarization with sumx
+After you've run your experiment, you will likely want to summarize the results.  You might want to know:
+* Which training run was best?
+* How long was an epoch
+* What about other metrics?
 
-You summarize your runs with `sumx`. sumx knows where your logs are kept: it's the concatenation of LOGROOT and your experiment name.
-So all you need to do is tell sumx which experiment you want summarized:
+You summarize your runs with on the commandline with `sumx`. All you need to do is tell `sumx` which experiment you want summarized. `sumx` knows what your LOGROOT (it'll get that from the .runx file) and so it looks within that directory for your experiment directory.
+
+In the following example, we ask `sumx` to summarize the `sweep` experiment.
 
 ```bash
 > python -m runx.sumx sweep --sortwith acc
@@ -131,9 +144,7 @@ run3    0.02  sgd     99.0   10     5:05
 run1    0.01  sgd     98.2   10     5:15
 run2    0.01  adam    98.1   10     5:12
 ```
-sumx is part of the runx suite, and is able to summarize the different hyperparmeters used as well as the
-metrics/results of your runs. Notice that we used the --sortwith feature of sumx, which sorts your results so
-you can easily locate your best runs.
+`sumx` is part of the runx suite, and is able to summarize the different hyperparmeters used as well as the metrics/results of your runs. Notice that we used the --sortwith feature of sumx, which sorts your results so you can easily locate your best runs.
 
 This is the basic idea.
 The following sections will go into more details about all the various features.
@@ -155,39 +166,23 @@ These modules are intended to be used jointly, but if you just want to use runx,
 However using sumx requires that you've used logx to record metrics.
 
 
-
-## Installation
-
-The easiest way to install is via pip:
-
-```bash
-> pip install runx --extra-index-url=https://pypi.perflab.nvidia.com
-```
-
-Alternatively, you could make runx a git submodule of your project:
-
-``` bash
-cd <your repo>
-git submodule add -b master ssh://git@gitlab-master.nvidia.com:runx.git
-```
-
 ## Create a project-specific configuration file
+In order to use `runx`, you need to create a configuration file in the directory where you'll call the `runx` CLI.
 
-Create a .runx file within your repo using the example below.
-The .runx file defines whether and how to submit jobs to your compute cluster, and where to put the output.
-
+The .runx file defines a number of critical fields:
 * `LOGROOT` - the root directory where you want your logs placed. This is a path that any farm job can write to.
 * `FARM` - if defined, jobs should be submitted to this farm, else run interactively
-* `SUBMIT_CMD` - the cluster submission command
-* `RESOURCES` - hyperparameters passed to `submit_cmd`
+* For a given farm, these fields are required:
+  + `SUBMIT_CMD` - the farm submission command
+  + `RESOURCES` - hyperparameters passed to the `SUBMIT_CMD`. You can list any number of these items, the ones shown below are just examples.
 * `CODE_IGNORE_PATTERNS` - ignore these files patterns when copying code to output directory
 
 Here's an example of such a file:
 
 ```yaml
 LOGROOT: /home/logs
-FARM: bigfarm
 CODE_IGNORE_PATTERNS: '.git,*.pyc,docs*,test*'
+FARM: bigfarm
 
 # Farm resource needs
 bigfarm:
@@ -209,13 +204,11 @@ smallfarm:
 
 ## Run directory, logfiles
 
-runx has two level of experiment hierarchy: **experiments** and **runs**.
-An experiment correponds to a single yaml file, which may contain many runs.
+runx has two level of experiment hierarchy: **experiments** and **runs**. An `experiment` corresponds to a single yaml file, which may contain many `runs`.
 
-runx creates both a parent experiment directory and a unique output directory for each run.
-The name of the experiment directory is `LOGROOT/<experiment name>`, so in the example of
-sweep.yml, the experiment name is `sweep`, derived from the yaml filename.
+`runx` creates both a parent experiment directory and a unique subdirectory for each run. The name of the experiment directory is `LOGROOT/<experiment name>`, so in the example of sweep.yml, the experiment name is `sweep`, derived from the yaml filename.
 
+For example, this might be the directory structure for the sweep study:
 ```bash
 /home/logs
   sweep/
@@ -224,14 +217,39 @@ sweep.yml, the experiment name is `sweep`, derived from the yaml filename.
      ...
 ```
 
-The individual run directories are named with a combination of `coolname` and date. The
-use of `coolname` makes it much easier to refer to a given run than referring to a date code.
+The individual run directories are named with a combination of `coolname` and date. The use of `coolname` makes it much easier to refer to a given run than referring to a date code.
 
-The names can be customized using the RUNX.TAG field in your experiment yaml.
+If you include the RUNX.TAG field in your experiment yaml or if you supply the --tag argument to the `runx` CLI, the names will include that tag.
 
-Copying code: because runx actually copies your code to each run's output directory, runx is essentially checkpointing your code. This provides two services: (1) it allows you to change your sourcecode after you've launch some runs (2) it records exactly what code was used for a particular run
+## Staging of code
+`runx` actually makes a copy of your code within each run's log directory. This is done for a number of reasons:
+* If you wish to continue modifying your code, while a training run is going on, you may do so without worry whether it will affect the running job(s)
+* In case your job dies and you must restart it, the code and training environment is self-contained within the logdir of a run.
+* This is also useful for documentation purposes: in case you ever want to know exactly the state of the code for a given run. 
+
 
 ## Experiment yaml details
+
+### Special variables
+**CMD** - Your base training command. You typically don't include any args here.
+**HPARAMS** - All hyperparmeters. This is a datastructure that may either be a simple dict of params or may be a list of dicts. Furthermore, each hyperparameter may be a scalar or list or boolean.
+**PYTHONPATH** - This is field optional. For the purpose of altering the default PYTHONPATH which is simply LOGDIR/code. Can be a colon-separated list of paths. May include LOGDIR special variable. 
+
+### HPARAMS
+
+#### A simple example of HPARAMS is:
+```yaml
+CMD: "python train.py"
+
+HPARAMS:
+  logdir: LOGDIR
+  adam: true
+  arch: alexnet
+  lr: [0.01, 0.02]
+  epochs: 10
+  RUNX.TAG: 'alexnet'
+```
+Here, there will be 2 runs that will be created. 
 
 ### Booleans
 If you want to specify that a boolean flag should be on or off, this is done using `true` and `false` keywords:
@@ -259,6 +277,9 @@ For example:
 
 You can do this with hparams defined as follows:
 ```yaml
+PYTHONPATH: LOGDIR/code:LOGDIR/code/lib
+CMD: "python train.py"
+
 HPARAMS: [
   {
    logdir: LOGDIR,
@@ -269,6 +290,12 @@ HPARAMS: [
    RUNX.TAG: 'alexnet',
   },
   {
+   arch: resnet50,
+   lr: [0.002, 0.005],
+   RUNX.TAG: 'resnet50',
+  },
+  {
+   RUNX.SKIP: true,
    arch: resnet50,
    lr: [0.002, 0.005],
    RUNX.TAG: 'resnet50',
@@ -396,6 +423,5 @@ Necessary steps:
   to the `SUBMIT_CMD`, which must be `ngc batch run`.
 
 
-You should be able to launch jobs to NGC using this configuration.
-When jobs write their results, you should also be able to see the results in the mounted workspace,
+You should be able to launch jobs to NGC using this configuration. When jobs write their results, you should also be able to see the results in the mounted workspace,
 and then you should be able to run runx.sumx in order to summarize the results of those runs.
