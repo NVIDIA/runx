@@ -60,7 +60,7 @@ class NormalDistribution(BaseDistribution):
 
 
 class LogUniformDistribution(BaseDistribution):
-    def __init__(self, low: float, high: float, base: float=None):
+    def __init__(self, low: float, high: float, base: float=math.e):
         self.low = low
         self.high = high
         self.base = base
