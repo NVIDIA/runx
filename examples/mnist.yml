@@ -1,6 +1,14 @@
 CMD: "python mnist.py"
 
+NUM_TRIALS: 10
 HPARAMS:
-   lr: [0.01, 0.02]
-   momentum: 0.5
+   lr:
+      distribution: log_uniform
+      low: 0.0001
+      high: 0.1
+      base: 10
+   momentum:
+      distribution: uniform
+      low: 0.5
+      high: 0.999
    logdir: LOGDIR

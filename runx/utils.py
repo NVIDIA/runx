@@ -81,7 +81,7 @@ def read_config_file():
     elif os.path.exists(global_config_fn):
         config_fn = global_config_fn
     else:
-        raise('can\'t find file ./.runx or ~/.config/runx.yml config files')
+        raise FileNotFoundError('Can\'t find file ./.runx or ~/.config/runx.yml config files')
     if 'FullLoader' in dir(yaml):
         global_config = yaml.load(open(config_fn), Loader=yaml.FullLoader)
     else:

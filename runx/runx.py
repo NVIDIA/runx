@@ -34,6 +34,7 @@ from datetime import datetime
 from shutil import copytree, ignore_patterns
 
 import os
+import random
 import re
 import sys
 import subprocess
@@ -41,9 +42,14 @@ import yaml
 import argparse
 import itertools
 
-from .utils import read_config, save_hparams, exec_cmd
 from .config import cfg
+from .distributions import (
+    load_config, convert_to_distribution,
+    can_enumerate, enumerate_dists,
+    sample_dists
+)
 from .farm import build_farm_cmd, upload_to_ngc
+from .utils import read_config, save_hparams, exec_cmd
 
 
 parser = argparse.ArgumentParser(description='Experiment runner')
@@ -79,7 +85,7 @@ def expand_hparams(hparams):
 def construct_cmd(cmd, hparams, logdir):
     """
     Build training command by starting with user-supplied 'CMD'
-    and then adding in hyperparameters, which came from expanding the 
+    and then adding in hyperparameters, which came from expanding the
     cross-product of all permutations from the experiment yaml file.
 
     We always copy the code to the target logdir and run from there.
@@ -102,7 +108,7 @@ def construct_cmd(cmd, hparams, logdir):
     exec_str = ''
     if 'submit_job' in cfg.SUBMIT_CMD:
         exec_str = 'exec'
-        
+
     cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} {exec_str} {cmd}'
     return cmd
 
@@ -149,12 +155,38 @@ def cross_product_hparams(hparams):
     expanded_hparams = itertools.product(*hparam_values)
 
     # have to do this in order to know length
-    expanded_hparams, dup_expanded = itertools.tee(expanded_hparams, 2)
     expanded_hparams = list(expanded_hparams)
-    num_cases = len(list(dup_expanded))
+    num_cases = len(expanded_hparams)
 
     return expanded_hparams, num_cases
 
+
+def enumerate_hparams(hparams, num_trials):
+    for k in hparams:
+        hparams[k] = load_config(hparams[k])
+
+    if can_enumerate(hparams.values()):
+        realizations = enumerate_dists(hparams.values())
+
+        if num_trials == 0 or num_trials > len(realizations):
+            return realizations
+        else:
+            return random.choices(realizations, k=num_trials)
+    else:
+        if num_trials == 0:
+            raise ValueError("The number of trials must be specified"
+                             " when optimizing over continuous"
+                             " distributions")
+
+        realizations = [
+            sample_dists(hparams.values())
+            for _ in range(num_trials)
+        ]
+
+        return realizations
+
+    # # TODO: Determine if full grid search, or smarter
+    # return cross_product_hparams(hparams)
 
 def get_field(adict, f, required=True):
     if required:
@@ -283,8 +315,11 @@ def run_yaml(experiment, runroot):
     for k, v in experiment['HPARAMS'].items():
         yaml_hparams[k] = v
 
+    num_trials = experiment.get('NUM_TRIALS', 0)
+
     # Calculate cross-product of hyperparams
-    expanded_hparams, num_cases = cross_product_hparams(yaml_hparams)
+    expanded_hparams = enumerate_hparams(yaml_hparams, num_trials)
+    num_cases = len(expanded_hparams)
 
     # Run each permutation
     for i, hparam_vals in enumerate(expanded_hparams):
@@ -328,7 +363,7 @@ def run_yaml(experiment, runroot):
 
         if not args.interactive:
             cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
-            
+
         if args.no_run:
             print(cmd)
             continue
@@ -351,7 +386,7 @@ def run_yaml(experiment, runroot):
         else:
             print('Submitting job {}'.format(job_name))
         exec_cmd(cmd)
-            
+
 
 def run_experiment(exp_fn):
     """
