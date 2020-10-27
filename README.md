@@ -14,6 +14,8 @@
   - [Introduction example](#introduction-example)
     - [runx is especially useful to launch batch jobs to a farm.](#runx-is-especially-useful-to-launch-batch-jobs-to-a-farm)
     - [Unique run directories](#unique-run-directories)
+    - [Hyperopt Sampling](#hyperopt-sampling)
+      - [Supported Distributions](#supported-distributions)
   - [Summarization with sumx](#summarization-with-sumx)
   - [runx Architecture](#runx-architecture)
   - [Create a project-specific configuration file](#create-a-project-specific-configuration-file)
@@ -70,7 +72,7 @@ python train.py --lr 0.01 --solver adam
 python train.py --lr 0.02 --solver sgd
 python train.py --lr 0.02 --solver adam
 ```
-You can see that runx automatically computes the cross product of all hyperparameters, which in this case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with the training command.
+You can see that runx automatically computes the cross product of all hyperparameters, which in this case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with the training command. runx also supports more advanced search, such as sampling values from distributions.
 
 A few useful runx options:
 ```
@@ -135,6 +137,69 @@ submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.01 --solver ada
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver sgd  --logdir /home/logs/arrogant-buffalo_2020.02.06_14.19"
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver adam  --logdir /home/logs/vengeful-jaguar_2020.02.06_14.19"
 ```
+
+### Hyperopt Sampling
+In addition to performing an exhaustive search over the space of hyperparameters, runx also supports sampling parameter values from some common distributions. Currently, the only supported sweep method when using distributions is random sampling. While unintuitive, random sampling theoretically leads to better models using fewer trials than exhaustive grid searching. Refer to this [tutorial](https://blog.usejournal.com/a-comparison-of-grid-search-and-randomized-search-using-scikit-learn-29823179bc85) for some insight into this.
+
+An example usage of distributions can be found in the `mnist*.yml` examples.
+
+```yml
+CMD: "python mnist.py"
+
+NUM_TRIALS: 10
+HPARAMS:
+   lr:
+      distribution: log_uniform
+      low: 0.0001
+      high: 0.1
+      base: 10
+   momentum:
+      distribution: uniform
+      low: 0.5
+      high: 0.999
+   optim: ['sgd', 'adam', 'radam']
+   use_bn: [true, false]
+   logdir: LOGDIR
+```
+
+Here, there are some key changes from the simple enumeration shown before. In particular, `NUM_TRIALS` specifies the number of jobs that will be launched, and **must** be specified when using distributions. For the distribution parameters, instead of providing explicit values for a parameter, you instead provide the parameters to the distribution from which to sample.
+
+Next, you'll notice that `lr` and `momentum` are sampled from distributions, but `optim`, `use_bn` and `logdir` have an explicit set of values. The behavior of runx is such that concrete values will be uniformly realized, guaranteed. What this means is that 6 different sets of runs will be launched. We arrive at 6 because of the number of combinations of `(optim, use_bn, logdir)` is 6.
+
+Next, runx finds the minimum number of samples per set that is closest to `NUM_TRIALS` but results in each concrete realization being evenly sampled. In this case, this requires 12 trials, where each set gets 2 samples values from the `lr` and `momentum` distributions.
+
+**NOTE**: If the number of actual trials is `> 2 * NUM_TRIALS` runx will emit an error instead of executing the trials. To fix this, either increase the number of trials, or make some of your concrete parameters be the `categorical` distribution in the config instead.
+
+
+#### Supported Distributions
+
+```yml
+some_param:
+    distribution: uniform
+    low: <the smallest possible value, inclusive>
+    high: <the largest possible value, inclusive>
+some_param2:
+    distribution: log_uniform
+    low: <the smallest possible value, inclusive>
+    high: <the largest possible value, inclusive>
+    base: <optional (default e) - the base of the logarithm>
+some_param3:
+    distribution: normal
+    mean: <optional (default 0)>
+    std: <optional (default 1) - The standard deviation>
+some_param4:
+    # NOTE: While this seems similar to providing explicit values,
+    # instead of the combinations being realized, this will instead be
+    # sampled from.
+    distribution: categorical
+    categories: [a, b, c, 1, 2, 3]
+some_param5:
+    distribution: multinomial
+    categories: [x, y, z, 1.5, 3, 7]
+    # NOTE: It's not necessary for the weights to sum to 1
+    weights: [1, 2, 3, 4, 5, 6]
+```
+
 
 ## Summarization with sumx
 After you've run your experiment, you will likely want to summarize the results.  You might want to know:

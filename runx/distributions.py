@@ -128,6 +128,7 @@ _FACTORIES = {
     'normal': NormalDistribution,
     'log_uniform': LogUniformDistribution,
     'categorical': CategoricalDistribution,
+    'multinomial': MultinomialDistribution,
 }
 
 def load_config(cfg: Union[Any, Dict[str, Primitive]]):
