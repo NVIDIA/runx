@@ -33,21 +33,19 @@ from coolname import generate_slug
 from datetime import datetime
 from shutil import copytree, ignore_patterns
 
+import argparse
+import itertools
 import os
+import math
 import random
 import re
 import sys
 import subprocess
+from typing import Iterable, List
 import yaml
-import argparse
-import itertools
 
 from .config import cfg
-from .distributions import (
-    load_config, convert_to_distribution,
-    can_enumerate, enumerate_dists,
-    sample_dists
-)
+from .distributions import enumerate_hparams
 from .farm import build_farm_cmd, upload_to_ngc
 from .utils import read_config, save_hparams, exec_cmd
 
@@ -126,67 +124,6 @@ def save_cmd(cmd, logdir):
 def islist(elem):
     return type(elem) is list or type(elem) is tuple
 
-
-def cross_product_hparams(hparams):
-    """
-    This function takes in just the hyperparameters for the target script,
-    such as your main.py.
-
-    inputs:
-      hparams is a dict, where each key is the name of a commandline arg and
-      the value is the target value of the arg.
-
-      However any arg can also be a list and so this function will calculate
-      the cross product for all combinations of all args.
-
-    output:
-      The return value is a sequence of lists. Each list is one of the
-      permutations of argument values.
-    """
-    hparam_values = []
-
-    # turn every hyperparam into a list, to prep for itertools.product
-    for elem in hparams.values():
-        if islist(elem):
-            hparam_values.append(elem)
-        else:
-            hparam_values.append([elem])
-
-    expanded_hparams = itertools.product(*hparam_values)
-
-    # have to do this in order to know length
-    expanded_hparams = list(expanded_hparams)
-    num_cases = len(expanded_hparams)
-
-    return expanded_hparams, num_cases
-
-
-def enumerate_hparams(hparams, num_trials):
-    for k in hparams:
-        hparams[k] = load_config(hparams[k])
-
-    if can_enumerate(hparams.values()):
-        realizations = enumerate_dists(hparams.values())
-
-        if num_trials == 0 or num_trials > len(realizations):
-            return realizations
-        else:
-            return random.choices(realizations, k=num_trials)
-    else:
-        if num_trials == 0:
-            raise ValueError("The number of trials must be specified"
-                             " when optimizing over continuous"
-                             " distributions")
-
-        realizations = [
-            sample_dists(hparams.values())
-            for _ in range(num_trials)
-        ]
-
-        return realizations
-
-    # # TODO: Determine if full grid search, or smarter
-    # return cross_product_hparams(hparams)
 
 def get_field(adict, f, required=True):
     if required:

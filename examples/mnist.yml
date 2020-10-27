@@ -11,4 +11,5 @@ HPARAMS:
       distribution: uniform
       low: 0.5
       high: 0.999
+   optim: ['sgd', 'adam', 'radam']
    logdir: LOGDIR

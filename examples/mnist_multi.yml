@@ -15,6 +15,7 @@ HPARAMS: [
     low: 0.0001,
     high: 0.1
    },
+   # TODO: Discrete distributions should be sampled evenly!
    momentum: [0.25, 0.12],
    logdir: LOGDIR,
   },
