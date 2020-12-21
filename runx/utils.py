@@ -108,7 +108,7 @@ def read_config(args_farm, args_exp_yml):
     # Inherit global config into experiment config:
     experiment = global_config
     if args_exp_yml is not None:
-        exp_config = yaml.load(with open(args_exp_yml), Loader=yaml.Safe_Loader)
+        exp_config = yaml.load(with open(args_exp_yml), Loader=yaml.SafeLoader)
         for k, v in exp_config.items():
             experiment[k] = v
 
