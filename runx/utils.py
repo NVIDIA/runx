@@ -83,9 +83,9 @@ def read_config_file():
     else:
         raise('can\'t find file ./.runx or ~/.config/runx.yml config files')
     if 'FullLoader' in dir(yaml):
-        global_config = yaml.load(open(config_fn), Loader=yaml.FullLoader)
+        global_config = yaml.load(open(config_fn), Loader=yaml.SafeLoader)
     else:
-        global_config = yaml.load(open(config_fn))
+        global_config = yaml.safe_load(open(config_fn))
     return global_config
 
 
@@ -108,7 +108,7 @@ def read_config(args_farm, args_exp_yml):
     # Inherit global config into experiment config:
     experiment = global_config
     if args_exp_yml is not None:
-        exp_config = yaml.load(open(args_exp_yml), Loader=yaml.FullLoader)
+        exp_config = yaml.load(open(args_exp_yml), Loader=yaml.SafeLoader)
         for k, v in exp_config.items():
             experiment[k] = v
 
