@@ -8,17 +8,28 @@
 * unique, per-run, directory creation
 
 # Table of Contents
-- [Quick-start Installation](#quick-start-installation)
-- [Introduction: a simple example](#introduction--a-simple-example)
-- [runx Architecture](#runx-architecture)
-- [Create a project-specific configuration file](#create-a-project-specific-configuration-file)
-- [Run directory, logfiles](#run-directory--logfiles)
-- [Experiment yaml details](#experiment-yaml-details)
-  * [Booleans](#booleans)
-  * [Lists, Inheritance](#lists--inheritance)
-- [logx - logging, tensorboarding, checkpointing](#logx---logging--tensorboarding--checkpointing)
-- [sumx - summarizing your runs](#sumx---summarizing-your-runs)
-- [NGC Support](#ngc-support)
+- [runx - An experiment management tool](#runx---an-experiment-management-tool)
+- [Table of Contents](#table-of-contents)
+  - [Quick-start Installation](#quick-start-installation)
+  - [Introduction example](#introduction-example)
+    - [runx is especially useful to launch batch jobs to a farm.](#runx-is-especially-useful-to-launch-batch-jobs-to-a-farm)
+    - [Unique run directories](#unique-run-directories)
+    - [Hyperopt Sampling](#hyperopt-sampling)
+      - [Supported Distributions](#supported-distributions)
+  - [Summarization with sumx](#summarization-with-sumx)
+  - [runx Architecture](#runx-architecture)
+  - [Create a project-specific configuration file](#create-a-project-specific-configuration-file)
+  - [Run directory, logfiles](#run-directory-logfiles)
+  - [Staging of code](#staging-of-code)
+  - [Experiment yaml details](#experiment-yaml-details)
+    - [Special variables](#special-variables)
+    - [HPARAMS](#hparams)
+      - [A simple example of HPARAMS is:](#a-simple-example-of-hparams-is)
+    - [Booleans](#booleans)
+    - [Lists, Inheritance](#lists-inheritance)
+  - [logx - logging, tensorboarding, checkpointing](#logx---logging-tensorboarding-checkpointing)
+  - [sumx - summarizing your runs](#sumx---summarizing-your-runs)
+  - [NGC Support](#ngc-support)
 
 ## Quick-start Installation
 
@@ -59,16 +70,16 @@ Now you can run the sweep with runx:
 python train.py --lr 0.01 --solver sgd
 python train.py --lr 0.01 --solver adam
 python train.py --lr 0.02 --solver sgd
-python train.py --lr 0.02 --solver adam 
+python train.py --lr 0.02 --solver adam
 ```
-You can see that runx automatically computes the cross product of all hyperparameters, which in this case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with the training command.
+You can see that runx automatically computes the cross product of all hyperparameters, which in this case results in 4 runs. It then builds commandlines by concatenating the hyperparameters with the training command. runx also supports more advanced search, such as sampling values from distributions.
 
 A few useful runx options:
 ```
 -n     don't run, just print the command
 -i     interactive mode (as opposed to submitting jobs to a farm)
 ```
-### runx is especially useful to launch batch jobs to a farm. 
+### runx is especially useful to launch batch jobs to a farm.
 
 Farm support is simple. First create a .runx file that configures the farm:
 ```yaml
@@ -83,8 +94,11 @@ bigfarm:
      mem: 128
 ```
 **LOGROOT**: this is where the output of runs should go
+
 **FARM**: you can define multiple farm targets. This selects which one to use
+
 **SUBMIT_CMD**: the script you use to launch jobs to a farm
+
 **RESOURCES**: the arguments to present to SUBMIT_CMD
 
 Now when you run runx, it will generate commands that will attempt to launch jobs to a farm using your SUBMIT_CMD. Notice that we left out the `-i` cmdline arg because now we want to submit jobs and not run them interactively.
@@ -99,7 +113,7 @@ submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver ada
 ```
 
 ### Unique run directories
-We want the results for each training run to go into a unique output/log directory.  We don't want things like tensorboard files or logfiles to write over each other. `runx` solves this problem by automatically generating a unique output directory per run. 
+We want the results for each training run to go into a unique output/log directory.  We don't want things like tensorboard files or logfiles to write over each other. `runx` solves this problem by automatically generating a unique output directory per run.
 
 You have access to this unique directory name within your experiment yaml via the special variable: `LOGDIR`. Your training
 script may use this path and write its output there.
@@ -123,6 +137,69 @@ submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.01 --solver ada
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver sgd  --logdir /home/logs/arrogant-buffalo_2020.02.06_14.19"
 submit_job --gpu 2 --cpu 16 --mem 128 -c "python train.py --lr 0.02 --solver adam  --logdir /home/logs/vengeful-jaguar_2020.02.06_14.19"
 ```
+
+### Hyperopt Sampling
+In addition to performing an exhaustive search over the space of hyperparameters, runx also supports sampling parameter values from some common distributions. Currently, the only supported sweep method when using distributions is random sampling. While unintuitive, random sampling theoretically leads to better models using fewer trials than exhaustive grid searching. Refer to this [tutorial](https://blog.usejournal.com/a-comparison-of-grid-search-and-randomized-search-using-scikit-learn-29823179bc85) for some insight into this.
+
+An example usage of distributions can be found in the `mnist*.yml` examples.
+
+```yml
+CMD: "python mnist.py"
+
+NUM_TRIALS: 10
+HPARAMS:
+   lr:
+      distribution: log_uniform
+      low: 0.0001
+      high: 0.1
+      base: 10
+   momentum:
+      distribution: uniform
+      low: 0.5
+      high: 0.999
+   optim: ['sgd', 'adam', 'radam']
+   use_bn: [true, false]
+   logdir: LOGDIR
+```
+
+Here, there are some key changes from the simple enumeration shown before. In particular, `NUM_TRIALS` specifies the number of jobs that will be launched, and **must** be specified when using distributions. For the distribution parameters, instead of providing explicit values for a parameter, you instead provide the parameters to the distribution from which to sample.
+
+Next, you'll notice that `lr` and `momentum` are sampled from distributions, but `optim`, `use_bn` and `logdir` have an explicit set of values. The behavior of runx is such that concrete values will be uniformly realized, guaranteed. What this means is that 6 different sets of runs will be launched. We arrive at 6 because of the number of combinations of `(optim, use_bn, logdir)` is 6.
+
+Next, runx finds the minimum number of samples per set that is closest to `NUM_TRIALS` but results in each concrete realization being evenly sampled. In this case, this requires 12 trials, where each set gets 2 samples values from the `lr` and `momentum` distributions.
+
+**NOTE**: If the number of actual trials is `> 2 * NUM_TRIALS` runx will emit an error instead of executing the trials. To fix this, either increase the number of trials, or make some of your concrete parameters be the `categorical` distribution in the config instead.
+
+
+#### Supported Distributions
+
+```yml
+some_param:
+    distribution: uniform
+    low: <the smallest possible value, inclusive>
+    high: <the largest possible value, inclusive>
+some_param2:
+    distribution: log_uniform
+    low: <the smallest possible value, inclusive>
+    high: <the largest possible value, inclusive>
+    base: <optional (default e) - the base of the logarithm>
+some_param3:
+    distribution: normal
+    mean: <optional (default 0)>
+    std: <optional (default 1) - The standard deviation>
+some_param4:
+    # NOTE: While this seems similar to providing explicit values,
+    # instead of the combinations being realized, this will instead be
+    # sampled from.
+    distribution: categorical
+    categories: [a, b, c, 1, 2, 3]
+some_param5:
+    distribution: multinomial
+    categories: [x, y, z, 1.5, 3, 7]
+    # NOTE: It's not necessary for the weights to sum to 1
+    weights: [1, 2, 3, 4, 5, 6]
+```
+
 
 ## Summarization with sumx
 After you've run your experiment, you will likely want to summarize the results.  You might want to know:
@@ -225,7 +302,7 @@ If you include the RUNX.TAG field in your experiment yaml or if you supply the -
 `runx` actually makes a copy of your code within each run's log directory. This is done for a number of reasons:
 * If you wish to continue modifying your code, while a training run is going on, you may do so without worry whether it will affect the running job(s)
 * In case your job dies and you must restart it, the code and training environment is self-contained within the logdir of a run.
-* This is also useful for documentation purposes: in case you ever want to know exactly the state of the code for a given run. 
+* This is also useful for documentation purposes: in case you ever want to know exactly the state of the code for a given run.
 
 
 ## Experiment yaml details
@@ -233,7 +310,7 @@ If you include the RUNX.TAG field in your experiment yaml or if you supply the -
 ### Special variables
 **CMD** - Your base training command. You typically don't include any args here.
 **HPARAMS** - All hyperparmeters. This is a datastructure that may either be a simple dict of params or may be a list of dicts. Furthermore, each hyperparameter may be a scalar or list or boolean.
-**PYTHONPATH** - This is field optional. For the purpose of altering the default PYTHONPATH which is simply LOGDIR/code. Can be a colon-separated list of paths. May include LOGDIR special variable. 
+**PYTHONPATH** - This is field optional. For the purpose of altering the default PYTHONPATH which is simply LOGDIR/code. Can be a colon-separated list of paths. May include LOGDIR special variable.
 
 ### HPARAMS
 
@@ -249,7 +326,7 @@ HPARAMS:
   epochs: 10
   RUNX.TAG: 'alexnet'
 ```
-Here, there will be 2 runs that will be created. 
+Here, there will be 2 runs that will be created.
 
 ### Booleans
 If you want to specify that a boolean flag should be on or off, this is done using `true` and `false` keywords:
@@ -302,7 +379,7 @@ HPARAMS: [
   }
 ]
 ```
-You might observe that hparams is now a list of two dicts. 
+You might observe that hparams is now a list of two dicts.
 The nice thing is that runx assumes inheritance from the first item in the list to all remaining dicts, so that you don't have to re-type all the redundant hyperparms.
 
 When you pass this yaml to runx, you'll get the following out:
@@ -347,7 +424,7 @@ Then, substitute the following logx calls into your code:
 | writer.add_image()  | logx.add_image()  | tensorboard image writes  |
 |                     | logx.save_model() | save latest/best models   |
 
-Finally, in order for sumx to be able to read the results of your run, you have to push your metrics to logx. You should definitely push the 'val' metrics, but can push 'train' metrics if you like (sumx doesn't consume them at the moment). 
+Finally, in order for sumx to be able to read the results of your run, you have to push your metrics to logx. You should definitely push the 'val' metrics, but can push 'train' metrics if you like (sumx doesn't consume them at the moment).
 
 ```python
 # define which metrics to record

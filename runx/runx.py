@@ -33,17 +33,21 @@ from coolname import generate_slug
 from datetime import datetime
 from shutil import copytree, ignore_patterns
 
+import argparse
+import itertools
 import os
+import math
+import random
 import re
 import sys
 import subprocess
+from typing import Iterable, List
 import yaml
-import argparse
-import itertools
 
-from .utils import read_config, save_hparams, exec_cmd
 from .config import cfg
+from .distributions import enumerate_hparams
 from .farm import build_farm_cmd, upload_to_ngc
+from .utils import read_config, save_hparams, exec_cmd
 
 
 parser = argparse.ArgumentParser(description='Experiment runner')
@@ -79,7 +83,7 @@ def expand_hparams(hparams):
 def construct_cmd(cmd, hparams, logdir):
     """
     Build training command by starting with user-supplied 'CMD'
-    and then adding in hyperparameters, which came from expanding the 
+    and then adding in hyperparameters, which came from expanding the
     cross-product of all permutations from the experiment yaml file.
 
     We always copy the code to the target logdir and run from there.
@@ -102,7 +106,7 @@ def construct_cmd(cmd, hparams, logdir):
     exec_str = ''
     if 'submit_job' in cfg.SUBMIT_CMD:
         exec_str = 'exec'
-        
+
     cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} {exec_str} {cmd}'
     return cmd
 
@@ -119,41 +123,6 @@ def save_cmd(cmd, logdir):
 
 def islist(elem):
     return type(elem) is list or type(elem) is tuple
-
-
-def cross_product_hparams(hparams):
-    """
-    This function takes in just the hyperparameters for the target script,
-    such as your main.py.
-
-    inputs:
-      hparams is a dict, where each key is the name of a commandline arg and
-      the value is the target value of the arg.
-
-      However any arg can also be a list and so this function will calculate
-      the cross product for all combinations of all args.
-
-    output:
-      The return value is a sequence of lists. Each list is one of the
-      permutations of argument values.
-    """
-    hparam_values = []
-
-    # turn every hyperparam into a list, to prep for itertools.product
-    for elem in hparams.values():
-        if islist(elem):
-            hparam_values.append(elem)
-        else:
-            hparam_values.append([elem])
-
-    expanded_hparams = itertools.product(*hparam_values)
-
-    # have to do this in order to know length
-    expanded_hparams, dup_expanded = itertools.tee(expanded_hparams, 2)
-    expanded_hparams = list(expanded_hparams)
-    num_cases = len(list(dup_expanded))
-
-    return expanded_hparams, num_cases
 
 
 def get_field(adict, f, required=True):
@@ -283,8 +252,11 @@ def run_yaml(experiment, runroot):
     for k, v in experiment['HPARAMS'].items():
         yaml_hparams[k] = v
 
+    num_trials = experiment.get('NUM_TRIALS', 0)
+
     # Calculate cross-product of hyperparams
-    expanded_hparams, num_cases = cross_product_hparams(yaml_hparams)
+    expanded_hparams = enumerate_hparams(yaml_hparams, num_trials)
+    num_cases = len(expanded_hparams)
 
     # Run each permutation
     for i, hparam_vals in enumerate(expanded_hparams):
@@ -328,7 +300,7 @@ def run_yaml(experiment, runroot):
 
         if not args.interactive:
             cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
-            
+
         if args.no_run:
             print(cmd)
             continue
@@ -351,7 +323,7 @@ def run_yaml(experiment, runroot):
         else:
             print('Submitting job {}'.format(job_name))
         exec_cmd(cmd)
-            
+
 
 def run_experiment(exp_fn):
     """

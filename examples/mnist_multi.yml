@@ -1,17 +1,23 @@
 CMD: "python mnist.py"
 
+NUM_TRIALS: 10
 HPARAMS: [
   {
-   RUNX.TAG: 'foo',
+   RUNX.TAG: 'sgd',
    lr: 0.01,
    momentum: [0.5, 0.25],
    logdir: LOGDIR,
   },
   {
-   RUNX.TAG: 'bar',
-   lr: 0.02,
+   RUNX.TAG: 'adam',
+   lr: {
+    distribution: log_uniform,
+    low: 0.0001,
+    high: 0.1
+   },
+   # TODO: Discrete distributions should be sampled evenly!
    momentum: [0.25, 0.12],
    logdir: LOGDIR,
   },
 ]
-   
+
