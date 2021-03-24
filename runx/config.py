@@ -9,3 +9,4 @@ cfg = __C
 __C.FARM = None
 __C.LOGROOT = None
 __C.EXP_NAME = None
+__C.YML_PARAMS = False

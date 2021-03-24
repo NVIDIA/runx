@@ -63,6 +63,8 @@ parser.add_argument('--no_cooldir', action='store_true',
                     help='no coolname, no datestring')
 parser.add_argument('--farm', type=str, default=None,
                     help='Select farm for workstation submission')
+parser.add_argument('--yml_params', action='store_true',
+                    help='Hyperparameters are specified via a config yaml as opposed to through the command line.')
 args = parser.parse_args()
 
 
@@ -91,8 +93,10 @@ def construct_cmd(cmd, hparams, logdir):
     :cmd: farm submission command
     :hparams: hyperparams for training command
     """
-    # First, add hyperparameters
-    cmd += ' ' + expand_hparams(hparams)
+    # Only add to the command line if YML_PARAMS isn't specified
+    if not cfg.YML_PARAMS:
+        # First, add hyperparameters
+        cmd += ' ' + expand_hparams(hparams)
 
     # Expand PYTHONPATH, if necessary
     if cfg.PYTHONPATH is not None:
@@ -135,18 +139,21 @@ def do_keyword_expansion(alist, pairs):
     """
     Substitute a string in place of certain keywords
     """
-    if type(alist) is list or type(alist) is tuple:
+    if isinstance(alist, (list, tuple)):
         for i, v in enumerate(alist):
-            if type(v) == str:
-                for k, v in pairs:
-                    alist[i] = alist[i].replace(k, v)
-    elif type(alist) is dict:
+            alist[i] = do_keyword_expansion(v, pairs)
+        return alist
+    elif isinstance(alist, dict):
         for a_k, a_v in alist.items():
-            if type(a_v) == str:
-                for k, v in pairs:
-                    alist[a_k] = alist[a_k].replace(k, v)
+            alist[a_k] = do_keyword_expansion(a_v, pairs)
+        return alist
+    elif isinstance(alist, str):
+        ret = alist
+        for k, v in pairs:
+            ret = ret.replace(k, v)
+        return ret
     else:
-        raise
+        return alist
 
 
 def make_cool_names():
@@ -180,10 +187,17 @@ def copy_code(logdir, runroot, code_ignore_patterns):
     copytree(runroot, tgt_code_dir, ignore=code_ignore_patterns)
 
 
-def hacky_substitutions(hparams, resource_copy, logdir, runroot):
+def write_yml_params(logdir, hparams):
+    with open(os.path.join(logdir, 'hparams.yml'), 'w') as fd:
+        yaml.dump(hparams, fd)
+
+
+def hacky_substitutions(cmd, hparams, resource_copy, logdir, runroot, replica):
+    replace_list = [('LOGDIR', logdir), ('REPLICA', str(replica))]
     # Substitute the true logdir in for the magic variable LOGDIR
-    do_keyword_expansion(hparams, [('LOGDIR', logdir)])
-    do_keyword_expansion(resource_copy, [('LOGDIR', logdir)])
+    hparams = do_keyword_expansion(hparams, replace_list)
+    resource_copy = do_keyword_expansion(resource_copy, replace_list)
+    cmd = do_keyword_expansion(cmd, replace_list)
 
     # Build hparams to save out after LOGDIR but before deleting
     # the key 'SUBMIT_JOB.NODES', so that it is part of the hparams saved
@@ -203,7 +217,7 @@ def hacky_substitutions(hparams, resource_copy, logdir, runroot):
     # Record the directory from whence the experiments were launched
     hparams_out['srcdir'] = runroot
 
-    return hparams_out
+    return cmd, hparams_out
 
 
 def get_tag(hparams):
@@ -253,76 +267,87 @@ def run_yaml(experiment, runroot):
         yaml_hparams[k] = v
 
     num_trials = experiment.get('NUM_TRIALS', 0)
+    num_replications = experiment.get('NUM_REPLICAS', 1)
 
     # Calculate cross-product of hyperparams
     expanded_hparams = enumerate_hparams(yaml_hparams, num_trials)
     num_cases = len(expanded_hparams)
 
     # Run each permutation
-    for i, hparam_vals in enumerate(expanded_hparams):
-        hparam_vals = list(hparam_vals)
-        hparam_keys = list(yaml_hparams.keys())
+    for hparam_vals in expanded_hparams:
+        g_job_name, g_logdir, coolname, expdir = make_cool_names()
 
-        # hparams to use for experiment
-        hparams = {k: v for k, v in zip(hparam_keys, hparam_vals)}
-        if skip_run(hparams):
-            continue
-        get_tag(hparams)
+        for replica in range(num_replications):
+            if num_replications > 1:
+                job_name = f'{g_job_name}_run_{replica}'
+                logdir = f'{g_logdir}/run_{replica}'
+            else:
+                job_name = g_job_name
+                logdir = g_logdir
 
-        job_name, logdir, coolname, expdir = make_cool_names()
-        resource_copy = resources.copy()
+            hparam_vals = list(hparam_vals)
+            hparam_keys = list(yaml_hparams.keys())
 
-        """
-        A few different modes of operation:
-        1. interactive runs
-           a. copy local code to logdir under LOGROOT
-           b. cd to logdir, execute cmd
+            # hparams to use for experiment
+            hparams = {k: v for k, v in zip(hparam_keys, hparam_vals)}
+            if skip_run(hparams):
+                continue
+            get_tag(hparams)
 
-        2. farm submission: non-NGC
-           In this regime, the LOGROOT is expected to be visible to the farm's compute nodes
-           a. copy local code to logdir under LOGROOT
-           b. call cmd, which should invoke whatever you have specified for SUBMIT_JOB
+            resource_copy = resources.copy()
+            """
+            A few different modes of operation:
+            1. interactive runs
+            a. copy local code to logdir under LOGROOT
+            b. cd to logdir, execute cmd
 
-        3. farm submission: NGC
-           a. copy local code to logdir under LOGROOT
-           b. ngc workspace upload the logdir to NGC_WORKSPACE
-           c. call cmd, which should invoke SUBMIT_JOB==`ngc batch run`
-        """
-        if ngc_batch:
-            ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
-            hparams_out = hacky_substitutions(
-                hparams, resource_copy, ngc_logdir, runroot)
-            cmd = construct_cmd(experiment_cmd, hparams, ngc_logdir)
-        else:
-            hparams_out = hacky_substitutions(
-                hparams, resource_copy, logdir, runroot)
-            cmd = construct_cmd(experiment_cmd, hparams, logdir)
+            2. farm submission: non-NGC
+            In this regime, the LOGROOT is expected to be visible to the farm's compute nodes
+            a. copy local code to logdir under LOGROOT
+            b. call cmd, which should invoke whatever you have specified for SUBMIT_JOB
 
-        if not args.interactive:
-            cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
+            3. farm submission: NGC
+            a. copy local code to logdir under LOGROOT
+            b. ngc workspace upload the logdir to NGC_WORKSPACE
+            c. call cmd, which should invoke SUBMIT_JOB==`ngc batch run`
+            """
+            if ngc_batch:
+                ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
+                cmd, hparams_out = hacky_substitutions(
+                    experiment_cmd, hparams, resource_copy, ngc_logdir, runroot, replica)
+                cmd = construct_cmd(cmd, hparams, ngc_logdir)
+            else:
+                cmd, hparams_out = hacky_substitutions(
+                    experiment_cmd, hparams, resource_copy, logdir, runroot, replica)
+                cmd = construct_cmd(cmd, hparams, logdir)
 
-        if args.no_run:
-            print(cmd)
-            continue
+            if not args.interactive:
+                cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
 
-        # copy code to NFS-mounted share
-        copy_code(logdir, runroot, code_ignore_patterns)
+            if args.no_run:
+                print(cmd)
+                continue
 
-        # save some meta-data from run
-        save_cmd(cmd, logdir)
+            # copy code to NFS-mounted share
+            copy_code(logdir, runroot, code_ignore_patterns)
+            if cfg.YML_PARAMS:
+                write_yml_params(logdir, hparams)
 
-        # upload to remote farm
-        if ngc_batch:
-            upload_to_ngc(logdir)
+            # save some meta-data from run
+            save_cmd(cmd, logdir)
 
-        subprocess.call(['chmod', '-R', 'a+rw', expdir])
-        os.chdir(logdir)
+            # upload to remote farm
+            if ngc_batch:
+                upload_to_ngc(logdir)
 
-        if args.interactive:
-            print('Running job {}'.format(job_name))
-        else:
-            print('Submitting job {}'.format(job_name))
-        exec_cmd(cmd)
+            subprocess.call(['chmod', '-R', 'a+rw', expdir])
+            os.chdir(logdir)
+
+            if args.interactive:
+                print('Running job {}'.format(job_name))
+            else:
+                print('Submitting job {}'.format(job_name))
+            exec_cmd(cmd)
 
 
 def run_experiment(exp_fn):
@@ -330,7 +355,7 @@ def run_experiment(exp_fn):
     Run an experiment, given a global config file + an experiment file.
     The global config sets defaults that are inherited by the experiment.
     """
-    experiment = read_config(args.farm, args.exp_yml)
+    experiment = read_config(args.farm, args.exp_yml, args.yml_params)
 
     assert 'HPARAMS' in experiment, 'experiment file is missing hparams'
 

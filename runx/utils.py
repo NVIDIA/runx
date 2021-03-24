@@ -32,9 +32,12 @@ import yaml
 import shlex
 import json
 import socket
+import re
 
 import subprocess
 from subprocess import call, getoutput, DEVNULL
+
+from yaml.loader import FullLoader
 from .config import cfg
 
 
@@ -72,50 +75,106 @@ def read_config_item(config, key, optional=False):
         raise f'can\'t find {key} in config'
 
 
+def merge_recursive(a, b):
+    if isinstance(a, dict):
+        assert isinstance(b, dict)
+        ret = {**a}
+        for k, v in b.items():
+            if k in ret:
+                ret[k] = merge_recursive(ret[k], v)
+            else:
+                ret[k] = v
+        return ret
+    else:
+        return b
+
+
+def expand_environment(config):
+    '''
+    Converts dictionary values that begin with '$' into their corresponding environment values
+    '''
+    if isinstance(config, dict):
+        for k, v in config.items():
+            config[k] = expand_environment(v)
+        return config
+    elif isinstance(config, (list, tuple)):
+        for i, v in enumerate(config):
+            config[i] = expand_environment(v)
+    elif isinstance(config, str):
+        split_vars = re.split(r'(\$\w+)', config, flags=re.ASCII)
+        for i, part in enumerate(split_vars):
+            if part.startswith('$'):
+                env = os.environ.get(part[1:], None)
+                if env is None:
+                    raise ValueError(f'The environment variable ${part} doesn\'t exist!')
+                split_vars[i] = env
+
+        config = ''.join(split_vars)
+
+        return config
+    return config
+
+
+def load_yaml(file_name):
+    '''
+    Loads the yml file and returns the python object
+    '''
+    with open(file_name, 'r') as fd:
+        if 'FullLoader' in dir(yaml):
+            return yaml.load(fd, Loader=yaml.FullLoader)
+        else:
+            return yaml.load(fd)
+
 def read_config_file():
+    '''
+    Loads the user wide configuration (at ~/.config/runx.yml) and the project wide configuration (at ./.runx).
+    If both files exist, they are merged following the precendence that project settings overwrite global settings.
+    '''
     local_config_fn = './.runx'
     home = os.path.expanduser('~')
     global_config_fn = '{}/.config/runx.yml'.format(home)
+
+    config = dict()
+
+    if os.path.isfile(global_config_fn):
+        config = merge_recursive(config, load_yaml(global_config_fn))
     if os.path.isfile(local_config_fn):
-        config_fn = local_config_fn
-    elif os.path.exists(global_config_fn):
-        config_fn = global_config_fn
-    else:
-        raise FileNotFoundError('Can\'t find file ./.runx or ~/.config/runx.yml config files')
-    if 'FullLoader' in dir(yaml):
-        global_config = yaml.load(open(config_fn), Loader=yaml.FullLoader)
-    else:
-        global_config = yaml.load(open(config_fn))
-    return global_config
+        config = merge_recursive(config, load_yaml(local_config_fn))
+
+    if not config:
+        raise FileNotFoundError(f'Can\'t find file "{global_config_fn}" or "{local_config_fn}" config files!')
+
+    return config
 
 
-def read_config(args_farm, args_exp_yml):
+def read_config(args_farm, args_exp_yml, args_yml_params):
     '''
     Merge the global and experiment config files into a single config
     '''
-    global_config = read_config_file()
+    experiment = read_config_file()
+
+    if args_exp_yml is not None:
+        experiment = merge_recursive(experiment, load_yaml(args_exp_yml))
+
+    experiment = expand_environment(experiment)
 
     if args_farm is not None:
-        global_config['FARM'] = args_farm
+        experiment['FARM'] = args_farm
+    if args_yml_params:
+        experiment['YML_PARAMS'] = True
 
-    farm_name = read_config_item(global_config, 'FARM')
-    assert farm_name in global_config, f'Can\'t find farm {farm_name} defined in .runx'
+    farm_name = read_config_item(experiment, 'FARM')
+    assert farm_name in experiment, f'Can\'t find farm {farm_name} defined in .runx'
 
     # Dereference the farm config items
-    for k, v in global_config[farm_name].items():
-        global_config[k] = v
-
-    # Inherit global config into experiment config:
-    experiment = global_config
-    if args_exp_yml is not None:
-        exp_config = yaml.load(open(args_exp_yml), Loader=yaml.FullLoader)
-        for k, v in exp_config.items():
-            experiment[k] = v
+    for k, v in experiment[farm_name].items():
+        experiment[k] = v
 
     cfg.FARM = read_config_item(experiment, 'FARM')
     cfg.LOGROOT = read_config_item(experiment, 'LOGROOT')
     cfg.SUBMIT_CMD = read_config_item(experiment, 'SUBMIT_CMD')
     cfg.PYTHONPATH = read_config_item(experiment, 'PYTHONPATH', optional=True)
+    cfg.YML_PARAMS = read_config_item(experiment, 'YML_PARAMS')
     if args_exp_yml is not None:
         cfg.EXP_NAME = os.path.splitext(os.path.basename(args_exp_yml))[0]
     if 'ngc' in cfg.FARM:
