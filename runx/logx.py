@@ -317,9 +317,12 @@ class LogX(object):
             copyfile(self.save_ckpt_fn, self.best_ckpt_fn)
         return is_better
 
-    def get_best_checkpoint(self):
+    def get_best_checkpoint(self, checkpoint_dir=None):
         """
         Finds the checkpoint in `self.logdir` that is considered best.
+
+        If `checkpoint_dir` is supplied, then the best checkpoint in that
+        directory is found instead of `self.logdir`.
 
         If, for some reason, there are multiple best checkpoint files, then
         the one with the highest epoch will be preferred.
@@ -328,10 +331,60 @@ class LogX(object):
             None - If there is no best checkpoint file
             path (str) - The full path to the best checkpoint otherwise.
         """
-        match_str = r'^best_checkpoint_ep([0-9]+).pth$'
+        if not checkpoint_dir:
+            checkpoint_dir = self.logdir
+
+        return self.find_best_checkpoint(checkpoint_dir)
+
+    def get_checkpoint(self, checkpoint_dir=None, find_best=True):
+        """
+        Finds the checkpoint in `self.logdir` that is considered best.
+
+        If `checkpoint_dir` is supplied, then the best checkpoint in that
+        directory is found instead of `self.logdir`.
+
+        If, for some reason, there are multiple best checkpoint files, then
+        the one with the highest epoch will be preferred.
+
+        Returns:
+            None - If there is no best checkpoint file
+            path (str) - The full path to the best checkpoint otherwise.
+        """
+        if not checkpoint_dir:
+            checkpoint_dir = self.logdir
+
+        return self.find_checkpoint(checkpoint_dir, find_best=find_best)
+
+    @staticmethod
+    def find_best_checkpoint(checkpoint_dir):
+        return LogX.find_checkpoint(checkpoint_dir)
+
+    @staticmethod
+    def find_last_checkpoint(checkpoint_dir):
+        return LogX.find_checkpoint(checkpoint_dir, find_best=False)
+
+    @staticmethod
+    def find_checkpoint(checkpoint_dir, find_best=True):
+        """
+        Searches the specified directory for a latest checkpoint.
+
+        If `find_best == True` then it will search for the best checkpoint
+        based on the stored metric value. Otherwise, it will load the latest
+        saved checkpoint regardless of metric.
+
+        If no checkpoint is found, returns None
+        """
+        if os.path.isfile(checkpoint_dir):
+            return checkpoint_dir
+
+        if find_best:
+            match_str = r'^best_checkpoint_ep([0-9]+).pth$'
+        else:
+            match_str = r'^last_checkpoint_ep([0-9]+).pth$'
+
         best_epoch = -1
         best_checkpoint = None
-        for filename in os.listdir(self.logdir):
+        for filename in os.listdir(checkpoint_dir):
             match = re.fullmatch(match_str, filename)
             if match is not None:
                 # Extract the epoch number
@@ -342,7 +395,7 @@ class LogX(object):
 
         if best_checkpoint is None:
             return None
-        return os.path.join(self.logdir, best_checkpoint)
+        return os.path.join(checkpoint_dir, best_checkpoint)
 
     def load_model(self, path):
         """Restore a model and return a dict with any meta data included in

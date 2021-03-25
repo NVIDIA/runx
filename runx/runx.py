@@ -188,7 +188,7 @@ def copy_code(logdir, runroot, code_ignore_patterns):
 
 
 def write_yml_params(logdir, hparams):
-    with open(os.path.join(logdir, 'hparams.yml'), 'w') as fd:
+    with open(os.path.join(logdir, 'hyper_parameters.yml'), 'w') as fd:
         yaml.dump(hparams, fd)
 
 
