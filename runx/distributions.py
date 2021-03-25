@@ -54,12 +54,16 @@ class MultinomialDistribution(CategoricalDistribution):
 
 
 class UniformDistribution(BaseDistribution):
-    def __init__(self, low: float, high: float):
+    def __init__(self, low: float, high: float, is_integer: bool=False):
         self.low = low
         self.high = high
+        self.is_integer = is_integer
 
     def sample(self):
-        return random.uniform(self.low, self.high)
+        val = random.uniform(self.low, self.high)
+        if self.is_integer:
+            val = int(round(val))
+        return val
 
 
 class NormalDistribution(BaseDistribution):
