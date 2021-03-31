@@ -61,6 +61,8 @@ parser.add_argument('--interactive', '-i', action='store_true',
                     help='run interactively instead of submitting to farm')
 parser.add_argument('--no_cooldir', action='store_true',
                     help='no coolname, no datestring')
+parser.add_argument('--no_date', default=False, action='store_true',
+                    help='Don\'t include a date in the name suffix')
 parser.add_argument('--farm', type=str, default=None,
                     help='Select farm for workstation submission')
 parser.add_argument('--yml_params', action='store_true',
@@ -155,14 +157,20 @@ def do_keyword_expansion(alist, pairs):
     else:
         return alist
 
+used_names = set()
 
 def make_cool_names():
-    tagname = args.tag + '_' if args.tag else ''
-    datestr = datetime.now().strftime("_%Y.%m.%d_%H.%M")
-    if args.no_cooldir:
-        coolname = tagname
-    else:
-        coolname = tagname + generate_slug(2) + datestr
+    valid_name = False
+    while not valid_name:
+        tagname = args.tag + '_' if args.tag else ''
+        datestr = '' if args.no_date else datetime.now().strftime("_%Y.%m.%d_%H.%M")
+        if args.no_cooldir:
+            coolname = tagname
+        else:
+            coolname = tagname + generate_slug(2) + datestr
+        valid_name = coolname not in used_names
+
+    used_names.add(coolname)
 
     # Experiment directory is the parent of N runs
     expdir = os.path.join(cfg.LOGROOT, cfg.EXP_NAME)
