@@ -86,9 +86,9 @@ def read_config_file(args=None):
     else:
         raise('can\'t find file ./.runx or ~/.config/runx.yml config files')
     if 'FullLoader' in dir(yaml):
-        global_config = yaml.load(open(config_fn), Loader=yaml.FullLoader)
+        global_config = yaml.load(open(config_fn), Loader=yaml.SafeLoader)
     else:
-        global_config = yaml.load(open(config_fn))
+        global_config = yaml.safe_load(open(config_fn))
     return global_config
 
 
@@ -121,7 +121,8 @@ def read_config(args):
     # Merge experiment settings into the global configuration.
     # This allows an experiment yaml to override the settings in the .runx
     if hasattr(args, 'exp_yml'):
-        exp_config = yaml.load(open(args.exp_yml), Loader=yaml.FullLoader)
+        exp_config = yaml.load(open(args.exp_yml), Loader=yaml.SafeLoader)
+
         for k, v in exp_config.items():
             if k in experiment:
                 experiment.update(v)
