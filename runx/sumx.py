@@ -37,8 +37,7 @@ import time
 import json
 import csv
 
-from .config import cfg
-from .utils import get_logroot, read_config
+from .utils import read_config, get_cfg
 
 
 parser = argparse.ArgumentParser(
@@ -390,15 +389,15 @@ def summarize_experiment(parent_dir):
 
 def main():
 
-    read_config(args_farm=None, args_exp_yml=None)
+    read_config(args)
 
     if args.logroot is not None:
         logroot = args.logroot
-    elif 'ngc' in cfg.FARM:
-        logroot = cfg.NGC_LOGROOT
+    elif 'ngc' in get_cfg('FARM'):
+        logroot = get_cfg('NGC_LOGROOT')
     else:
-        logroot = cfg.LOGROOT
-        
+        logroot = get_cfg('LOGROOT')
+
     for adir in args.dirs:
         full_path = os.path.join(logroot, adir)
         summarize_experiment(full_path)

@@ -315,7 +315,16 @@ submit_job ... --name resnet50_2020.02.06_6.50 -c "python train.py --logdir ... 
 ```
 Because of inheritance, adam, arch, and epochs params are set identically in each run.
 
-This is also showing the use of the magic variable `RUNX.TAG`, which allows you to add a tag to a subset of your experiment. This is the same as if you'd used the --tag <tagname> option to runx.py, except that here you can specify the tag within the hparams data structure. The value of `RUNX.TAG` is not passed to your training script
+This is also showing the use of the magic variable `RUNX.TAG`, which allows you to add a tag to a subset of your experiment. This is the same as if you'd used the --tag <tagname> option to runx.py, except that here you can specify the tag within the hparams data structure. The value of `RUNX.TAG` is not passed to your training script.
+
+A very useful feature of RUNX.TAG is that you can reference other hyperparameters, for example:
+
+``` yaml
+   arch: resnet50,
+   RUNX.TAG: '{arch}-lrstudy'
+```
+
+This results in the tag becoming `resnet50-lrstudy`. `runx` performs simple string matching and substitution when it finds curly braces.
 
 ## logx - logging, tensorboarding, checkpointing
 In order to use sumx, you need to export metrics with logx.

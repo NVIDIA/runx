@@ -1,6 +1,12 @@
 from pathlib import Path
 from setuptools import setup, find_packages
 
+# Version info -- read without importing
+_locals = {}
+with open("runx/_version.py") as fp:
+    exec(fp.read(), None, _locals)
+    version = _locals["__version__"]
+
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
@@ -10,7 +16,7 @@ with open('requirements.txt') as f:
 parent = Path(__file__).resolve().parent
 setup(
     name="runx",
-    version="0.0.10",
+    version=version,
     author="Andrew Tao",
     author_email="atao@nvidia.com",
     description="runx - experiment manager for machine learning research",

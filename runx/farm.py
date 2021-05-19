@@ -108,6 +108,19 @@ def build_ngc(train_cmd, job_name, resources, logdir):
         return build_ngc_generic(train_cmd, job_name, resources, logdir)
 
 
+def build_generic(train_cmd, job_name, resources, logdir):
+    """
+    Generic farm support
+
+    See build_farm_cmd for arg description
+    """
+    if 'submit_job' in cfg.SUBMIT_CMD:
+        ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
+        return build_draco(train_cmd, job_name, resources, ngc_logdir)
+    else:
+        return build_ngc_generic(train_cmd, job_name, resources, logdir)
+
+
 def build_farm_cmd(train_cmd, job_name, resources, logdir):
     """
     This function builds a farm submission command.

@@ -1,0 +1,45 @@
+# runx configuration file.
+# 
+# LOGROOT - absolute path to where you want log output to go
+# FARM - which one of the many farms to use
+# SUBMIT_CMD - farm submission command
+# RESOURCES - args for SUBMIT_CMD
+# 
+# NGC_LOGROOT - where the ngc workspace is mounted on the client machine
+# WORKSPACE - the name of the workspace for log output on NGC
+
+
+LOGROOT: /home/dcg-adlr-atao-output.cosmos278/logs
+
+FARM: ngc-external
+
+draco:
+    SUBMIT_CMD: 'SUBMIT_SUBPROJECT_NAME=runx submit_job'
+    RESOURCES:
+        image: gitlab-master.nvidia.com/adlr/reconstruction/atao-dlss:1.4
+        duration: 8
+        autoresume_timer: 390
+        gpu: 1
+        mounts: /home/dcg-adlr-atao-output.cosmos278,/home/dcg-adlr-atao-data.cosmos277
+        setenv: SUBMIT_ACCOUNT=gpu_adlr_graphics
+        partition: batch
+
+ngc:
+    NGC_LOGROOT: /home/dcg-adlr-atao-output.cosmos278/logs_ngc
+    WORKSPACE: atao-output
+    SUBMIT_CMD: 'submit_job'
+    RESOURCES:
+       image: nvidian/pytorch:19.10-py3
+       gpu: 1
+
+ngc-external:
+    NGC_LOGROOT: /home/dcg-adlr-atao-output.cosmos278/logs_ngc
+    WORKSPACE: atao-output
+    SUBMIT_CMD: 'ngc batch run'
+    RESOURCES:
+       image: nvidian/pytorch:19.10-py3
+       instance: dgx1v.16g.1.norm
+       org: nvidian
+       ace: nv-us-west-2
+       team: adlr
+       result: /result

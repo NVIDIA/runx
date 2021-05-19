@@ -37,28 +37,33 @@ import os
 import re
 import sys
 import subprocess
-import yaml
 import argparse
 import itertools
 
-from .utils import read_config, save_hparams, exec_cmd
-from .config import cfg
+from .utils import read_config, exec_cmd, get_cfg
 from .farm import build_farm_cmd, upload_to_ngc
 
 
 parser = argparse.ArgumentParser(description='Experiment runner')
 parser.add_argument('exp_yml', type=str,
-                    help='experiment yaml file')
+                    help='Experiment yaml file')
+parser.add_argument('--exp_name', type=str, default=None,
+                    help=('Override the *experiment* name, which normally is '
+                          'taken from the experiment yaml filename.'))
 parser.add_argument('--tag', type=str, default=None,
-                    help='tag label for run')
-parser.add_argument('--no_run', '-n', action='store_true',
-                    help='don\'t run')
-parser.add_argument('--interactive', '-i', action='store_true',
-                    help='run interactively instead of submitting to farm')
+                    help=('Add a string to the generated *run* name for '
+                          ' identification.'))
 parser.add_argument('--no_cooldir', action='store_true',
-                    help='no coolname, no datestring')
+                    help=('For the *run* name, don\'t auto-generate a '
+                          'coolname or datestring, only use the tag'))
+parser.add_argument('--no_run', '-n', action='store_true',
+                    help='Don\'t run, just display the command.')
+parser.add_argument('--interactive', '-i', action='store_true',
+                    help='Run interactively instead of submitting to farm.')
 parser.add_argument('--farm', type=str, default=None,
                     help='Select farm for workstation submission')
+parser.add_argument('--config_file', '-c', type=str, default=None,
+                    help='Use this file instead of .runx')
 args = parser.parse_args()
 
 
@@ -91,8 +96,8 @@ def construct_cmd(cmd, hparams, logdir):
     cmd += ' ' + expand_hparams(hparams)
 
     # Expand PYTHONPATH, if necessary
-    if cfg.PYTHONPATH is not None:
-        pythonpath = cfg.PYTHONPATH
+    if get_cfg('PYTHONPATH') is not None:
+        pythonpath = get_cfg('PYTHONPATH')
         pythonpath = pythonpath.replace('LOGDIR', logdir)
     else:
         pythonpath = f'{logdir}/code'
@@ -100,9 +105,9 @@ def construct_cmd(cmd, hparams, logdir):
     # For signalling reasons, we have to insert the exec here when using submit_job.
     # Nvidia-internal thing.
     exec_str = ''
-    if 'submit_job' in cfg.SUBMIT_CMD:
+    if 'submit_job' in get_cfg('SUBMIT_CMD'):
         exec_str = 'exec'
-        
+
     cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} {exec_str} {cmd}'
     return cmd
 
@@ -189,14 +194,14 @@ def make_cool_names():
         coolname = tagname + generate_slug(2) + datestr
 
     # Experiment directory is the parent of N runs
-    expdir = os.path.join(cfg.LOGROOT, cfg.EXP_NAME)
+    expdir = os.path.join(get_cfg('LOGROOT'), get_cfg('EXP_NAME'))
 
     # Each run has a logdir
     logdir_name = coolname
     logdir = os.path.join(expdir, logdir_name)
 
     # Jobname is a unique name for the batch job
-    job_name = '{}_{}'.format(cfg.EXP_NAME, coolname)
+    job_name = '{}_{}'.format(get_cfg('EXP_NAME'), coolname)
     return job_name, logdir, logdir_name, expdir
 
 
@@ -219,7 +224,7 @@ def hacky_substitutions(hparams, resource_copy, logdir, runroot):
     # Build hparams to save out after LOGDIR but before deleting
     # the key 'SUBMIT_JOB.NODES', so that it is part of the hparams saved
     # This is done so that we can see the node count in sumx.
-    hparams_out = hparams.copy()
+    # hparams_out = hparams.copy()
 
     # SUBMIT_JOB.NODES is a hyperparmeter that sets the node count
     # This is actually a resource, so when we find this arg, we delete
@@ -232,9 +237,9 @@ def hacky_substitutions(hparams, resource_copy, logdir, runroot):
         del hparams['SUBMIT_JOB.PARTITION']
 
     # Record the directory from whence the experiments were launched
-    hparams_out['srcdir'] = runroot
+    # hparams_out['srcdir'] = runroot
 
-    return hparams_out
+    # return hparams_out
 
 
 def get_tag(hparams):
@@ -273,7 +278,7 @@ def run_yaml(experiment, runroot):
     """
     resources = get_field(experiment, 'RESOURCES')
     code_ignore_patterns = get_code_ignore_patterns(experiment)
-    ngc_batch = 'ngc' in cfg.FARM and not args.interactive
+    ngc_batch = 'ngc' in get_cfg('FARM') and not args.interactive
     experiment_cmd = experiment['CMD']
 
     # Build the args that the submit_cmd will see
@@ -307,9 +312,11 @@ def run_yaml(experiment, runroot):
            b. cd to logdir, execute cmd
 
         2. farm submission: non-NGC
-           In this regime, the LOGROOT is expected to be visible to the farm's compute nodes
+           In this regime, the LOGROOT is expected to be visible to the farm's
+           compute nodes
            a. copy local code to logdir under LOGROOT
-           b. call cmd, which should invoke whatever you have specified for SUBMIT_JOB
+           b. call cmd, which should invoke whatever you have specified for
+              SUBMIT_JOB
 
         3. farm submission: NGC
            a. copy local code to logdir under LOGROOT
@@ -317,18 +324,19 @@ def run_yaml(experiment, runroot):
            c. call cmd, which should invoke SUBMIT_JOB==`ngc batch run`
         """
         if ngc_batch:
-            ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
-            hparams_out = hacky_substitutions(
+            ngc_logdir = logdir.replace(get_cfg('LOGROOT'),
+                                        get_cfg('NGC_LOGROOT'))
+            hacky_substitutions(
                 hparams, resource_copy, ngc_logdir, runroot)
             cmd = construct_cmd(experiment_cmd, hparams, ngc_logdir)
         else:
-            hparams_out = hacky_substitutions(
+            hacky_substitutions(
                 hparams, resource_copy, logdir, runroot)
             cmd = construct_cmd(experiment_cmd, hparams, logdir)
 
         if not args.interactive:
             cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
-            
+
         if args.no_run:
             print(cmd)
             continue
@@ -351,14 +359,14 @@ def run_yaml(experiment, runroot):
         else:
             print('Submitting job {}'.format(job_name))
         exec_cmd(cmd)
-            
+
 
 def run_experiment(exp_fn):
     """
     Run an experiment, given a global config file + an experiment file.
     The global config sets defaults that are inherited by the experiment.
     """
-    experiment = read_config(args.farm, args.exp_yml)
+    experiment = read_config(args)
 
     assert 'HPARAMS' in experiment, 'experiment file is missing hparams'
 

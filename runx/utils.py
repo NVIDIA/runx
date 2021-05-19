@@ -31,7 +31,7 @@ import os
 import yaml
 import shlex
 import json
-import socket
+from warnings import warn
 
 import subprocess
 from subprocess import call, getoutput, DEVNULL
@@ -53,17 +53,15 @@ trn_names = ('trn', 'train', 'training')
 val_names = ('val', 'validate', 'validation', 'test')
 
 
-def set_config(out_config, in_config, key, optional=False):
-    if key in in_config:
-        out_config[key] = in_config[key]
-        return
-    elif optional:
-        return
+def get_cfg(key):
+    if key in cfg:
+        return cfg[key]
     else:
-        raise 'couldn\'t find {} in config'.format(key)
+        warn(f'Please define {key} in .runx or your experiment file')
+        return None
 
 
-def read_config_item(config, key, optional=False):
+def read_config_item(config, key, optional=True):
     if key in config:
         return config[key]
     elif optional:
@@ -72,11 +70,16 @@ def read_config_item(config, key, optional=False):
         raise f'can\'t find {key} in config'
 
 
-def read_config_file():
+def read_config_file(args=None):
     local_config_fn = './.runx'
     home = os.path.expanduser('~')
     global_config_fn = '{}/.config/runx.yml'.format(home)
-    if os.path.isfile(local_config_fn):
+
+    if args is not None and hasattr(args, 'config_file') and \
+       args.config_file is not None and \
+       os.path.isfile(args.config_file):
+        config_fn = args.config_file
+    elif os.path.isfile(local_config_fn):
         config_fn = local_config_fn
     elif os.path.exists(global_config_fn):
         config_fn = global_config_fn
@@ -89,38 +92,64 @@ def read_config_file():
     return global_config
 
 
-def read_config(args_farm, args_exp_yml):
+def read_config(args):
     '''
     Merge the global and experiment config files into a single config
+
+    Need to support the case where there is no FARM defined, which should
+    be fine for interactive jobs.
     '''
-    global_config = read_config_file()
+    global_config = read_config_file(args)
 
-    if args_farm is not None:
-        global_config['FARM'] = args_farm
+    if hasattr(args, 'farm') and args.farm is not None:
+        global_config['FARM'] = args.farm
 
-    farm_name = read_config_item(global_config, 'FARM')
-    assert farm_name in global_config, f'Can\'t find farm {farm_name} defined in .runx'
-
-    # Dereference the farm config items
-    for k, v in global_config[farm_name].items():
-        global_config[k] = v
+    # Support the case of no farm
+    if 'FARM' not in global_config or \
+       global_config['FARM'] not in global_config:
+        no_farm = True
+    else:
+        no_farm = False
+        farm_name = read_config_item(global_config, 'FARM')
+        # Dereference the farm config items
+        for k, v in global_config[farm_name].items():
+            global_config[k] = v
 
     # Inherit global config into experiment config:
     experiment = global_config
-    if args_exp_yml is not None:
-        exp_config = yaml.load(open(args_exp_yml), Loader=yaml.FullLoader)
-        for k, v in exp_config.items():
-            experiment[k] = v
 
-    cfg.FARM = read_config_item(experiment, 'FARM')
-    cfg.LOGROOT = read_config_item(experiment, 'LOGROOT')
-    cfg.SUBMIT_CMD = read_config_item(experiment, 'SUBMIT_CMD')
-    cfg.PYTHONPATH = read_config_item(experiment, 'PYTHONPATH', optional=True)
-    if args_exp_yml is not None:
-        cfg.EXP_NAME = os.path.splitext(os.path.basename(args_exp_yml))[0]
-    if 'ngc' in cfg.FARM:
-        cfg.NGC_LOGROOT = read_config_item(experiment, 'NGC_LOGROOT')
-        cfg.WORKSPACE = read_config_item(experiment, 'WORKSPACE')
+    # Merge experiment settings into the global configuration.
+    # This allows an experiment yaml to override the settings in the .runx
+    if hasattr(args, 'exp_yml'):
+        exp_config = yaml.load(open(args.exp_yml), Loader=yaml.FullLoader)
+        for k, v in exp_config.items():
+            if k in experiment:
+                experiment.update(v)
+            else:
+                experiment[k] = v
+
+        if args.exp_name is not None:
+            cfg.EXP_NAME = args.exp_name
+        elif args.exp_yml is None:
+            cfg.EXP_NAME = 'none'
+        else:
+            cfg.EXP_NAME = os.path.splitext(os.path.basename(args.exp_yml))[0]
+
+    if no_farm:
+        cfg.FARM = 'NOFARM'
+        cfg.LOGROOT = read_config_item(experiment, 'LOGROOT')
+        cfg.SUBMIT_CMD = 'echo'
+        cfg.PYTHONPATH = ''
+        # have to define resources because runx expects it
+        global_config['RESOURCES'] = {}
+    else:
+        cfg.FARM = read_config_item(experiment, 'FARM')
+        cfg.LOGROOT = read_config_item(experiment, 'LOGROOT')
+        cfg.SUBMIT_CMD = read_config_item(experiment, 'SUBMIT_CMD')
+        cfg.PYTHONPATH = read_config_item(experiment, 'PYTHONPATH')
+        if 'ngc' in cfg.FARM:
+            cfg.NGC_LOGROOT = read_config_item(experiment, 'NGC_LOGROOT')
+            cfg.WORKSPACE = read_config_item(experiment, 'WORKSPACE')
 
     return experiment
 
