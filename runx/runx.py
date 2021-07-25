@@ -76,6 +76,8 @@ def expand_hparams(hparams):
         if type(val) is bool:
             if val is True:
                 cmd += '--{} '.format(field)
+        if type(val) is dict:
+            cmd += '--{} "{}" '.format(field, val)
         elif val != 'None':
             cmd += '--{} {} '.format(field, val)
     return cmd
