@@ -36,7 +36,7 @@ from .config import cfg
 from .utils import exec_cmd
 
 
-def expand_resources(resources):
+def expand_batch_args(batch_args):
     """
     Construct the submit_job arguments from the resource dict.
     
@@ -45,10 +45,10 @@ def expand_resources(resources):
     If the value is a list/tuple, then multiple '--k v' are presented,
     one for each list item.
 
-    :resources: a dict of arguments for the farm submission command.
+    :batch_args: a dict of arguments for the farm submission command.
     """
     cmd = ''
-    for field, val in resources.items():
+    for field, val in batch_args.items():
         if type(val) is bool:
             if val is True:
                 cmd += '--{} '.format(field)
@@ -60,83 +60,73 @@ def expand_resources(resources):
     return cmd
 
 
-def build_draco(train_cmd, job_name, resources, logdir):
+def build_draco(train_cmd, job_name, batch_args, logdir):
     """
     For using Draco, only for NVIDIA-ADLR folks
 
     See build_farm_cmd for arg description
     """
-    assert 'submit_job' in cfg.SUBMIT_CMD, \
-        'Expected \'submit_job\' as SUBMIT_CMD. Exiting ...'
-    submit_cmd = cfg.SUBMIT_CMD + ' '
-    submit_cmd += expand_resources(resources)
+    assert 'submit_job' in cfg.BATCH_CMD, \
+        'Expected \'submit_job\' as BATCH_CMD. Exiting ...'
+    submit_cmd = cfg.BATCH_CMD + ' '
+    submit_cmd += expand_batch_args(batch_args)
     submit_cmd += f' --name {job_name}'
     submit_cmd += f' --command \' {train_cmd} \''
     submit_cmd += f' --logdir {logdir}/gcf_log'
     return submit_cmd
 
 
-def build_ngc_generic(train_cmd, job_name, resources, logdir):
+def build_ngc_generic(train_cmd, job_name, batch_args, logdir):
     """
     Compose the farm submission command for generic NGC users, folks
     both inside and outside of Nvidia.
 
-    The SUBMIT_CMD should be 'ngc batch run'.
+    The BATCH_CMD should be 'ngc batch run'.
 
     See build_farm_cmd for arg description
     """
-    assert cfg.SUBMIT_CMD == 'ngc batch run', \
-        'Expected SUBMIT_CMD to be \'ngc batch run\'. Exiting ...'
-    submit_cmd = cfg.SUBMIT_CMD + ' '
-    submit_cmd += expand_resources(resources)
+    assert cfg.BATCH_CMD == 'ngc batch run', \
+        'Expected BATCH_CMD to be \'ngc batch run\'. Exiting ...'
+    workspace = cfg.ENV['WORKSPACE']
+    ngc_log_root = cfg.ENV['NGC_LOG_ROOT']
+    submit_cmd = cfg.BATCH_CMD + ' '
+    submit_cmd += expand_batch_args(batch_args)
     submit_cmd += f' --name {job_name}'
     submit_cmd += f' --commandline \' {train_cmd} \''
-    submit_cmd += f' --workspace {cfg.WORKSPACE}:{cfg.NGC_LOGROOT}:RW'
+    submit_cmd += f' --workspace {workspace}:{ngc_log_root}:RW'
     return submit_cmd
 
 
-def build_ngc(train_cmd, job_name, resources, logdir):
+def build_ngc(train_cmd, job_name, batch_args, logdir):
     """
     For using NGC with submit_job, only for NVIDIA-ADLR folks.
 
     See build_farm_cmd for arg description
     """
-    if 'submit_job' in cfg.SUBMIT_CMD:
-        ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
-        return build_draco(train_cmd, job_name, resources, ngc_logdir)
+    if 'submit_job' in cfg.BATCH_CMD:
+        ngc_logdir = logdir.replace(cfg.LOG_ROOT, cfg.NGC_LOG_ROOT)
+        return build_draco(train_cmd, job_name, batch_args, ngc_logdir)
     else:
-        return build_ngc_generic(train_cmd, job_name, resources, logdir)
+        return build_ngc_generic(train_cmd, job_name, batch_args, logdir)
 
 
-def build_generic(train_cmd, job_name, resources, logdir):
-    """
-    Generic farm support
-
-    See build_farm_cmd for arg description
-    """
-    if 'submit_job' in cfg.SUBMIT_CMD:
-        ngc_logdir = logdir.replace(cfg.LOGROOT, cfg.NGC_LOGROOT)
-        return build_draco(train_cmd, job_name, resources, ngc_logdir)
-    else:
-        return build_ngc_generic(train_cmd, job_name, resources, logdir)
-
-
-def build_farm_cmd(train_cmd, job_name, resources, logdir):
+def build_farm_cmd(train_cmd, job_name, batch_args, logdir):
     """
     This function builds a farm submission command.
 
     :train_cmd: full training command
     :job_name: unique job_name, to be used for tracking
-    :resources: farm submission command args, pulled from .runx
+    :batch_args: farm submission command args, pulled from .runx
     :logdir: target log directory
     """
 
-    if 'ngc' in cfg.FARM:
-        return build_ngc(train_cmd, job_name, resources, logdir)
-    elif 'draco' in cfg.FARM:
-        return build_draco(train_cmd, job_name, resources, logdir)
+    if 'NGC' in cfg.CLUSTER:
+        return build_ngc(train_cmd, job_name, batch_args, logdir)
+    elif 'DRACO' in cfg.CLUSTER or 'SELENE' in cfg.CLUSTER:
+        return build_draco(train_cmd, job_name, batch_args, logdir)
     else:
-        raise f'Unsupported farm: {cfg.FARM}'
+        raise ('Only NGC and Draco clusters supported. Feel free to add '
+               'another build_<yourcluster>() in farm.py')
 
 
 def upload_to_ngc(staging_logdir):

@@ -36,32 +36,34 @@ from shutil import copytree, ignore_patterns
 import os
 import re
 import sys
+import copy
 import subprocess
 import argparse
 import itertools
 
-from .utils import read_config, exec_cmd, get_cfg
+from .config import cfg, read_config_and_experiment
+from .utils import exec_cmd
 from .farm import build_farm_cmd, upload_to_ngc
 
+code_copy = None
 
 parser = argparse.ArgumentParser(description='Experiment runner')
 parser.add_argument('exp_yml', type=str,
-                    help='Experiment yaml file')
+                    help='Experiment definition file')
 parser.add_argument('--exp_name', type=str, default=None,
-                    help=('Override the *experiment* name, which normally is '
-                          'taken from the experiment yaml filename.'))
+                    help=('Override the *experiment* name, which normally comes '
+                          'from the experiment file basename.'))
 parser.add_argument('--tag', type=str, default=None,
-                    help=('Add a string to the generated *run* name for '
-                          ' identification.'))
+                    help=('Add a string to the generated run\'s directory name'))
 parser.add_argument('--no_cooldir', action='store_true',
                     help=('For the *run* name, don\'t auto-generate a '
                           'coolname or datestring, only use the tag'))
 parser.add_argument('--no_run', '-n', action='store_true',
                     help='Don\'t run, just display the command.')
 parser.add_argument('--interactive', '-i', action='store_true',
-                    help='Run interactively instead of submitting to farm.')
-parser.add_argument('--farm', type=str, default=None,
-                    help='Select farm for workstation submission')
+                    help='Run interactively instead of submitting to cluster.')
+parser.add_argument('--cluster', type=str, default=None,
+                    help='Override the environment var $CLUSTER with this')
 parser.add_argument('--config_file', '-c', type=str, default=None,
                     help='Use this file instead of .runx')
 args = parser.parse_args()
@@ -96,16 +98,16 @@ def construct_cmd(cmd, hparams, logdir):
     cmd += ' ' + expand_hparams(hparams)
 
     # Expand PYTHONPATH, if necessary
-    if get_cfg('PYTHONPATH') is not None:
-        pythonpath = get_cfg('PYTHONPATH')
-        pythonpath = pythonpath.replace('LOGDIR', logdir)
+    if cfg.PYTHONPATH is not None:
+        pythonpath = cfg.PYTHONPATH
+        pythonpath = pythonpath.replace('LOG_DIR', logdir)
     else:
         pythonpath = f'{logdir}/code'
 
     # For signalling reasons, we have to insert the exec here when using submit_job.
     # Nvidia-internal thing.
     exec_str = ''
-    if 'submit_job' in get_cfg('SUBMIT_CMD'):
+    if 'submit_job' in cfg.BATCH_CMD:
         exec_str = 'exec'
 
     cmd = f'cd {logdir}/code; PYTHONPATH={pythonpath} {exec_str} {cmd}'
@@ -194,32 +196,38 @@ def make_cool_names():
         coolname = tagname + generate_slug(2) + datestr
 
     # Experiment directory is the parent of N runs
-    expdir = os.path.join(get_cfg('LOGROOT'), get_cfg('EXP_NAME'))
+    expdir = os.path.join(cfg.ENV['LOG_ROOT'], cfg.EXP_NAME)
 
     # Each run has a logdir
     logdir_name = coolname
     logdir = os.path.join(expdir, logdir_name)
 
     # Jobname is a unique name for the batch job
-    job_name = '{}_{}'.format(get_cfg('EXP_NAME'), coolname)
+    job_name = '{}_{}'.format(cfg.EXP_NAME, coolname)
     return job_name, logdir, logdir_name, expdir
 
 
-def copy_code(logdir, runroot, code_ignore_patterns):
+def copy_code(logdir):
     """
-    Copy sourcecode to logdir's code directory
+    Copy sourcecode to logdir's code directory. When launching multiple runs, only
+    the first run copies the code, and the remaining runs link to the first copy.
     """
-    print('Copying codebase to {} ...'.format(logdir))
+    global code_copy
     tgt_code_dir = os.path.join(logdir, 'code')
-    if code_ignore_patterns is not None:
-        code_ignore_patterns = ignore_patterns(*code_ignore_patterns)
-    copytree(runroot, tgt_code_dir, ignore=code_ignore_patterns)
+    if code_copy is not None:
+        print(f'Linking code from {code_copy} to {logdir}')
+        os.symlink(code_copy, tgt_code_dir)
+    else:
+        print('Copying codebase to {} ...'.format(logdir))
+        code_ignore_patterns = ignore_patterns(*cfg.CODE_IGNORE_PATTERNS)
+        copytree(cfg.RUNROOT, tgt_code_dir, ignore=code_ignore_patterns)
+        code_copy = tgt_code_dir
 
 
-def hacky_substitutions(hparams, resource_copy, logdir, runroot):
+def hacky_substitutions(hparams, batch_args_copy, logdir):
     # Substitute the true logdir in for the magic variable LOGDIR
     do_keyword_expansion(hparams, [('LOGDIR', logdir)])
-    do_keyword_expansion(resource_copy, [('LOGDIR', logdir)])
+    do_keyword_expansion(batch_args_copy, [('LOGDIR', logdir)])
 
     # Build hparams to save out after LOGDIR but before deleting
     # the key 'SUBMIT_JOB.NODES', so that it is part of the hparams saved
@@ -230,10 +238,10 @@ def hacky_substitutions(hparams, resource_copy, logdir, runroot):
     # This is actually a resource, so when we find this arg, we delete
     # it from the list of hyperparams that the training script sees.
     if 'SUBMIT_JOB.NODES' in hparams:
-        resource_copy['nodes'] = hparams['SUBMIT_JOB.NODES']
+        batch_args_copy['nodes'] = hparams['SUBMIT_JOB.NODES']
         del hparams['SUBMIT_JOB.NODES']
     if 'SUBMIT_JOB.PARTITION' in hparams:
-        resource_copy['partition'] = hparams['SUBMIT_JOB.PARTITION']
+        batch_args_copy['partition'] = hparams['SUBMIT_JOB.PARTITION']
         del hparams['SUBMIT_JOB.PARTITION']
 
     # Record the directory from whence the experiments were launched
@@ -261,31 +269,17 @@ def skip_run(hparams):
     return 'RUNX.SKIP' in hparams and hparams['RUNX.SKIP']
 
 
-def get_code_ignore_patterns(experiment):
-    if 'CODE_IGNORE_PATTERNS' in experiment:
-        code_ignore_patterns = experiment['CODE_IGNORE_PATTERNS']
-    else:
-        code_ignore_patterns = '.git,*.pyc,docs*,test*'
-
-    code_ignore_patterns += ',*.pth' # don't copy checkpoints
-    code_ignore_patterns = code_ignore_patterns.split(',')
-    return code_ignore_patterns
-
-
-def run_yaml(experiment, runroot):
+def run_yaml(experiment):
     """
     Run an experiment, expand hparams
     """
-    resources = get_field(experiment, 'RESOURCES')
-    code_ignore_patterns = get_code_ignore_patterns(experiment)
-    ngc_batch = 'ngc' in get_cfg('FARM') and not args.interactive
-    experiment_cmd = experiment['CMD']
+    ngc_batch = 'NGC' in cfg.CLUSTER and not args.interactive
 
     # Build the args that the submit_cmd will see
     yaml_hparams = OrderedDict()
 
     # Add yaml_hparams
-    for k, v in experiment['HPARAMS'].items():
+    for k, v in experiment.HPARAMS.items():
         yaml_hparams[k] = v
 
     # Calculate cross-product of hyperparams
@@ -303,46 +297,46 @@ def run_yaml(experiment, runroot):
         get_tag(hparams)
 
         job_name, logdir, coolname, expdir = make_cool_names()
-        resource_copy = resources.copy()
+        batch_args_copy = cfg.BATCH_ARGS.copy()
 
         """
         A few different modes of operation:
         1. interactive runs
-           a. copy local code to logdir under LOGROOT
+           a. copy local code to logdir under LOG_ROOT
            b. cd to logdir, execute cmd
 
         2. farm submission: non-NGC
-           In this regime, the LOGROOT is expected to be visible to the farm's
+           In this regime, the LOG_ROOT is expected to be visible to the farm's
            compute nodes
-           a. copy local code to logdir under LOGROOT
+           a. copy local code to logdir under LOG_ROOT
            b. call cmd, which should invoke whatever you have specified for
               SUBMIT_JOB
 
         3. farm submission: NGC
-           a. copy local code to logdir under LOGROOT
+           a. copy local code to logdir under LOG_ROOT
            b. ngc workspace upload the logdir to NGC_WORKSPACE
            c. call cmd, which should invoke SUBMIT_JOB==`ngc batch run`
         """
         if ngc_batch:
-            ngc_logdir = logdir.replace(get_cfg('LOGROOT'),
-                                        get_cfg('NGC_LOGROOT'))
+            ngc_logdir = logdir.replace(cfg.ENV['LOG_ROOT'],
+                                        cfg.ENV['NGC_LOG_ROOT'])
             hacky_substitutions(
-                hparams, resource_copy, ngc_logdir, runroot)
-            cmd = construct_cmd(experiment_cmd, hparams, ngc_logdir)
+                hparams, batch_args_copy, ngc_logdir)
+            cmd = construct_cmd(cfg.CMD, hparams, ngc_logdir)
         else:
             hacky_substitutions(
-                hparams, resource_copy, logdir, runroot)
-            cmd = construct_cmd(experiment_cmd, hparams, logdir)
+                hparams, batch_args_copy, logdir)
+            cmd = construct_cmd(cfg.CMD, hparams, logdir)
 
         if not args.interactive:
-            cmd = build_farm_cmd(cmd, job_name, resource_copy, logdir)
+            cmd = build_farm_cmd(cmd, job_name, batch_args_copy, logdir)
 
         if args.no_run:
             print(cmd)
             continue
 
         # copy code to NFS-mounted share
-        copy_code(logdir, runroot, code_ignore_patterns)
+        copy_code(logdir)
 
         # save some meta-data from run
         save_cmd(cmd, logdir)
@@ -351,7 +345,7 @@ def run_yaml(experiment, runroot):
         if ngc_batch:
             upload_to_ngc(logdir)
 
-        subprocess.call(['chmod', '-R', 'a+rw', expdir])
+        # subprocess.call(['chmod', '-R', 'a+rw', expdir])
         os.chdir(logdir)
 
         if args.interactive:
@@ -361,41 +355,33 @@ def run_yaml(experiment, runroot):
         exec_cmd(cmd)
 
 
-def run_experiment(exp_fn):
+def run_experiment():
     """
     Run an experiment, given a global config file + an experiment file.
     The global config sets defaults that are inherited by the experiment.
     """
-    experiment = read_config(args)
-
-    assert 'HPARAMS' in experiment, 'experiment file is missing hparams'
-
     # Iterate over hparams if it's a list
-    runroot = os.getcwd()
-    if isinstance(experiment['HPARAMS'], (list, tuple)):
+    if isinstance(cfg.HPARAMS, (list, tuple)):
         # Support inheritance from the first hparams item in list
-        first_hparams = experiment['HPARAMS'][0].copy()
+        first_hparams = cfg.HPARAMS[0].copy()
 
-        for hparams_set in experiment['HPARAMS']:
+        for hparams_set in cfg.HPARAMS:
             hparams = first_hparams.copy()
             # Inheritance = first hparam set, updated with current hparam set
             hparams.update(hparams_set)
 
             # create a clean copy of the experiment and fill in hparams
-            experiment_copy = experiment.copy()
-            experiment_copy['HPARAMS'] = hparams
+            experiment_copy = copy.deepcopy(cfg)
+            experiment_copy.HPARAMS = hparams
 
-            run_yaml(experiment_copy, runroot)
+            run_yaml(experiment_copy)
     else:
-        run_yaml(experiment, runroot)
+        run_yaml(cfg)
 
 
 def main():
-    if os.path.exists(args.exp_yml):
-        run_experiment(args.exp_yml)
-    else:
-        print('couldn\'t find experiment file {}'.format(args.exp_yml))
-        sys.exit()
+    read_config_and_experiment(args)
+    run_experiment()
 
 
 if __name__ == '__main__':
