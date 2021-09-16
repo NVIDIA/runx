@@ -74,6 +74,11 @@ def read_cluster(args):
     return cluster
 
 
+def export_env():
+    for k, v in cfg.ENV.items():
+        os.environ[k] = v
+
+
 def read_config_and_experiment(args):
     """
     Read in .runx file and load it into global cfg
@@ -93,6 +98,8 @@ def read_config_and_experiment(args):
     cluster_config = runx_config[cfg.CLUSTER]
     cfg.ENV = cluster_config['ENV']
     assert 'LOG_ROOT' in cfg.ENV, f'Must define LOG_ROOT in ENV'
+
+    export_env()
     
     cfg.BATCH_CMD = cluster_config['BATCH_CMD']
     cfg.BATCH_ARGS = cluster_config['BATCH_ARGS']

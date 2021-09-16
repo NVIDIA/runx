@@ -225,9 +225,12 @@ def copy_code(logdir):
 
 
 def hacky_substitutions(hparams, batch_args_copy, logdir):
-    # Substitute the true logdir in for the magic variable LOGDIR
-    do_keyword_expansion(hparams, [('LOGDIR', logdir)])
-    do_keyword_expansion(batch_args_copy, [('LOGDIR', logdir)])
+    # Do expansion of all ENV vars specified in .runx and also LOGDIR
+    substitutions = [('LOGDIR', logdir)]
+    for k, v in cfg.ENV.items():
+        substitutions.append((k, v))
+    do_keyword_expansion(hparams, substitutions)
+    do_keyword_expansion(batch_args_copy, substitutions)
 
     # Build hparams to save out after LOGDIR but before deleting
     # the key 'SUBMIT_JOB.NODES', so that it is part of the hparams saved
