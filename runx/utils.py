@@ -106,7 +106,8 @@ def expand_environment(config):
             if part.startswith('$'):
                 env = os.environ.get(part[1:], None)
                 if env is None:
-                    raise ValueError(f'The environment variable ${part} doesn\'t exist!')
+                    # raise ValueError(f'The environment variable {part} doesn\'t exist!')
+                    env = part
                 split_vars[i] = env
 
         config = ''.join(split_vars)

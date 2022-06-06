@@ -170,6 +170,9 @@ def make_cool_names():
             coolname = tagname + generate_slug(2) + datestr
         valid_name = coolname not in used_names
 
+    if coolname.endswith('_'):
+        coolname = coolname[:-1]
+
     used_names.add(coolname)
 
     # Experiment directory is the parent of N runs
@@ -283,15 +286,7 @@ def run_yaml(experiment, runroot):
 
     # Run each permutation
     for hparam_vals in expanded_hparams:
-        g_job_name, g_logdir, coolname, expdir = make_cool_names()
-
         for replica in range(num_replications):
-            if num_replications > 1:
-                job_name = f'{g_job_name}_run_{replica}'
-                logdir = f'{g_logdir}/run_{replica}'
-            else:
-                job_name = g_job_name
-                logdir = g_logdir
 
             hparam_vals = list(hparam_vals)
             hparam_keys = list(yaml_hparams.keys())
@@ -301,6 +296,14 @@ def run_yaml(experiment, runroot):
             if skip_run(hparams):
                 continue
             get_tag(hparams)
+
+            g_job_name, g_logdir, coolname, expdir = make_cool_names()
+            if num_replications > 1:
+                job_name = f'{g_job_name}_run_{replica}'
+                logdir = f'{g_logdir}/run_{replica}'
+            else:
+                job_name = g_job_name
+                logdir = g_logdir
 
             resource_copy = resources.copy()
             """
