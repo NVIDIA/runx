@@ -67,6 +67,8 @@ parser.add_argument('--farm', type=str, default=None,
                     help='Select farm for workstation submission')
 parser.add_argument('--yml_params', action='store_true',
                     help='Hyperparameters are specified via a config yaml as opposed to through the command line.')
+parser.add_argument('--lazy', action='store_true',
+                    help='Don\'t run jobs that point to an existing output directory')
 args = parser.parse_args()
 
 
@@ -305,6 +307,9 @@ def run_yaml(experiment, runroot):
                 job_name = g_job_name
                 logdir = g_logdir
 
+            if args.lazy and os.path.exists(logdir):
+                continue
+
             resource_copy = resources.copy()
             """
             A few different modes of operation:
@@ -338,6 +343,8 @@ def run_yaml(experiment, runroot):
             if args.no_run:
                 print(cmd)
                 continue
+
+
 
             # copy code to NFS-mounted share
             copy_code(logdir, runroot, code_ignore_patterns)
