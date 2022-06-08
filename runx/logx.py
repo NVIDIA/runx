@@ -377,6 +377,9 @@ class LogX(object):
         if os.path.isfile(checkpoint_dir):
             return checkpoint_dir
 
+        if not os.path.isdir(checkpoint_dir):
+            return None
+
         if find_best:
             match_str = r'^best_checkpoint_ep([0-9]+).pth$'
         else:
