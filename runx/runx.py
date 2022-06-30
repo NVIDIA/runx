@@ -198,6 +198,7 @@ def copy_code(logdir, runroot, code_ignore_patterns):
     if code_ignore_patterns is not None:
         code_ignore_patterns = ignore_patterns(*code_ignore_patterns)
     copytree(runroot, tgt_code_dir, ignore=code_ignore_patterns)
+    return tgt_code_dir
 
 
 def write_yml_params(logdir, hparams):
@@ -288,6 +289,7 @@ def run_yaml(experiment, runroot):
 
     # Run each permutation
     for hparam_vals in expanded_hparams:
+        prev_codepath = None
         for replica in range(num_replications):
 
             hparam_vals = list(hparam_vals)
@@ -345,9 +347,14 @@ def run_yaml(experiment, runroot):
                 continue
 
 
+            if prev_codepath is None:
+                # copy code to NFS-mounted share
+                prev_codepath = copy_code(logdir, runroot, code_ignore_patterns)
+            else:
+                os.makedirs(logdir, exist_ok=True)
+                tgt = os.path.join(logdir, 'code')
+                os.symlink(prev_codepath, tgt)
 
-            # copy code to NFS-mounted share
-            copy_code(logdir, runroot, code_ignore_patterns)
             if cfg.YML_PARAMS:
                 write_yml_params(logdir, hparams)
 
@@ -358,7 +365,7 @@ def run_yaml(experiment, runroot):
             if ngc_batch:
                 upload_to_ngc(logdir)
 
-            subprocess.call(['chmod', '-R', 'a+rw', expdir])
+            # subprocess.call(['chmod', '-R', 'a+rw', expdir])
             os.chdir(logdir)
 
             if args.interactive:
