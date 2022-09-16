@@ -31,6 +31,7 @@ import os
 import yaml
 import shlex
 import json
+import logging
 from warnings import warn
 
 import subprocess
@@ -49,6 +50,7 @@ def exec_cmd(cmd):
         print(message)
 
 
+logger = logging.getLogger(__name__)
 trn_names = ('trn', 'train', 'training')
 val_names = ('val', 'validate', 'validation', 'test')
 
@@ -75,6 +77,7 @@ def read_config_file(args=None):
     home = os.path.expanduser('~')
     global_config_fn = '{}/.config/runx.yml'.format(home)
 
+    global_config = {"LOGROOT": os.path.join(home, '.cache/runx')}
     if args is not None and hasattr(args, 'config_file') and \
        args.config_file is not None and \
        os.path.isfile(args.config_file):
@@ -84,8 +87,10 @@ def read_config_file(args=None):
     elif os.path.exists(global_config_fn):
         config_fn = global_config_fn
     else:
-        raise('can\'t find file ./.runx or ~/.config/runx.yml config files')
-    if 'FullLoader' in dir(yaml):
+        config_fn = None
+    if config_fn is None:
+        logger.info("No runx config, use default.")
+    elif 'FullLoader' in dir(yaml):
         global_config = yaml.load(open(config_fn), Loader=yaml.SafeLoader)
     else:
         global_config = yaml.safe_load(open(config_fn))
