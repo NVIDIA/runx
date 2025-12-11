@@ -1,3 +1,7 @@
+## ⚠️ NOTICE: End of Life
+
+**This project is no longer maintained and contains security vulnerabilities. No further updates or security patches will be provided. Use at your own risk.**
+
 # runx - An experiment management tool
 
 `runx` helps to automate common tasks while doing research:
